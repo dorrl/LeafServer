@@ -51,6 +51,12 @@ app.get(PARENT + '/state', (_req, res) => {
     res.json(response);
 });
 
+app.get(PARENT + '/picos/:id/state', (req, res) => {
+    const id = cleanId(req.params.id);
+    if (!id || !picoList[id]) return res.status(404).json({ error: 'Pico not found' });
+    res.json({ state: 200, pico: picoList[id].export() });
+});
+
 app.get(PARENT + '/picos/:id/readings', (req, res) => {
     const id = cleanId(req.params.id);
     if (!id || !picoList[id]) return res.status(404).json({ error: 'Pico not found' });

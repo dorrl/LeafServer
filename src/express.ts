@@ -1,6 +1,6 @@
 import express from 'express';
 import http from 'node:http';
-import { Pico, clearTelemetry, getAlerts, getReadings, getSettings, loadPersistedData, picoList, saveState, startStorageScheduler, updateSettings } from './pico.js';
+import { Pico, clearTelemetry, getAlerts, getReadings, getSettings, loadPersistedData, picoList, ReadingPeriod, saveState, startStorageScheduler, updateSettings } from './pico.js';
 import { PicoState, PicoType, Respond, ServerSettings } from './types.js';
 import { config } from 'dotenv'
 
@@ -56,7 +56,12 @@ app.get(PARENT + '/picos/:id/readings', (req, res) => {
     if (!id || !picoList[id]) return res.status(404).json({ error: 'Pico not found' });
     const requestedLimit = Number(req.query.limit ?? 100);
     const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(requestedLimit, 720)) : 100;
-    res.json({ state: 200, readings: getReadings(id, limit) });
+    const period = req.query.period ?? 'all';
+    const validPeriods: ReadingPeriod[] = ['24h', '1d', '7d', '30d', '1y', 'all'];
+    if (typeof period !== 'string' || !validPeriods.includes(period as ReadingPeriod)) {
+        return res.status(400).json({ error: 'period must be one of: 24h, 1d, 7d, 30d, 1y, all' });
+    }
+    res.json({ state: 200, readings: getReadings(id, limit, period as ReadingPeriod) });
 });
 
 app.get(PARENT + '/notifications', (_req, res) => res.json({ state: 200, notifications: getAlerts() }));

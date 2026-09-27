@@ -84,7 +84,28 @@ export class Pico {
 }
 
 export const picoList: Record<string, Pico> = {};
-export function getReadings(picoId: string, limit = 100): Reading[] { pruneReadings(); return readings.filter(reading => reading.picoId === picoId).slice(0, Math.min(limit, 10_000)); }
+export type ReadingPeriod = '24h' | '1d' | '7d' | '30d' | '1y' | 'all';
+
+function periodCutoff(period: ReadingPeriod): number | null {
+    if (period === 'all') return null;
+    const durationMs: Record<Exclude<ReadingPeriod, 'all'>, number> = {
+        '24h': 24 * 60 * 60 * 1000,
+        '1d': 24 * 60 * 60 * 1000,
+        '7d': 7 * 24 * 60 * 60 * 1000,
+        '30d': 30 * 24 * 60 * 60 * 1000,
+        '1y': 365 * 24 * 60 * 60 * 1000,
+    };
+    return Date.now() - durationMs[period];
+}
+
+export function getReadings(picoId: string, limit = 100, period: ReadingPeriod = 'all'): Reading[] {
+    pruneReadings();
+    const cutoff = periodCutoff(period);
+    return readings
+        .filter(reading => reading.picoId === picoId)
+        .filter(reading => cutoff === null || new Date(reading.recordedAt).getTime() >= cutoff)
+        .slice(0, Math.min(limit, 10_000));
+}
 export function getAlerts(): Alert[] { return alerts; }
 export function clearTelemetry() { readings = []; alerts = []; persist(); }
 export function getSettings(): ServerSettings { return { ...settings }; }

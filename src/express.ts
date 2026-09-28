@@ -57,6 +57,27 @@ app.get(PARENT + '/picos/:id/state', (req, res) => {
     res.json({ state: 200, pico: picoList[id].export() });
 });
 
+app.post(PARENT + '/picos/:id/setName', requireApiKey, (req, res) => {
+    const id = cleanId(req.params.id);
+    if (!id || !picoList[id]) return res.status(404).json({ error: 'Pico not found' });
+
+    const body = req.body as { name?: unknown };
+    if (typeof body.name !== 'string') {
+        return res.status(400).json({ error: 'name must be a string' });
+    }
+
+    const name = body.name.trim();
+    if (!name) return res.status(400).json({ error: 'name must not be empty' });
+    if (name.length > 80) return res.status(400).json({ error: 'name must be 80 characters or fewer' });
+
+    const pico = picoList[id];
+    pico.name = name;
+    pico.updatedAt = new Date().toISOString();
+    saveState();
+
+    res.json({ state: 200, pico: pico.export() });
+});
+
 app.get(PARENT + '/picos/:id/readings', (req, res) => {
     const id = cleanId(req.params.id);
     if (!id || !picoList[id]) return res.status(404).json({ error: 'Pico not found' });

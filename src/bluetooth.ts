@@ -214,33 +214,32 @@ function applyPicoState(pico: Pico, data: Buffer, characteristicUuid: string, so
 
 function attachNotificationHandler(pico: Pico, characteristic: Characteristic) {
   let pendingText = '';
+
   characteristic.on('data', (data: Buffer) => {
-    const looksLikeBinary = data.length === 6 || data.length === 12;
-    const looksLikeText = data.some(byte => byte === 10 || byte === 13 || (byte >= 32 && byte <= 126));
-    if (looksLikeBinary && !looksLikeText) {
-      applyPicoState(pico, data, characteristic.uuid, 'notification');
-      return;
-    }
-
+    // Pico sends newline-delimited UTF-8 JSON. BLE notifications may split a
+    // single JSON message across multiple packets, so buffer until a newline.
     pendingText += data.toString('utf-8');
+
     if (pendingText.length > MAX_PENDING_TEXT) {
-      const newline = pendingText.lastIndexOf('\n');
-      const objectStart = pendingText.lastIndexOf('{');
-      const keepFrom = Math.max(newline + 1, objectStart);
-      pendingText = keepFrom > 0 ? pendingText.slice(keepFrom) : pendingText.slice(-1024);
+      const newline = pendingText.lastIndexOf('\\n');
+      pendingText = newline >= 0 ? pendingText.slice(newline + 1) : pendingText.slice(-1024);
     }
 
-    let newlineIndex = pendingText.indexOf('\n');
+    let newlineIndex = pendingText.indexOf('\\n');
     while (newlineIndex >= 0) {
-      const line = pendingText.slice(0, newlineIndex).replace(/\r$/, '').trim();
+      const line = pendingText.slice(0, newlineIndex).replace(/\\r$/, '').trim();
       pendingText = pendingText.slice(newlineIndex + 1);
-      if (line) applyPicoState(pico, Buffer.from(line, 'utf-8'), characteristic.uuid, 'notification');
-      newlineIndex = pendingText.indexOf('\n');
+
+      if (line) {
+        applyPicoState(pico, Buffer.from(line, 'utf-8'), characteristic.uuid, 'notification');
+      }
+
+      newlineIndex = pendingText.indexOf('\\n');
     }
   });
 
   characteristic.on('error', (error: Error) => {
-    console.error(`[BLE] Notification error: Pico=${pico.id} characteristic=${characteristic.uuid}:`, error.message);
+    console.error('[BLE] Notification error: Pico=' + pico.id + ' characteristic=' + characteristic.uuid + ':', error.message);
   });
 }
 

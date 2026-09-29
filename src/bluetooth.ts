@@ -38,7 +38,7 @@ function delay(ms: number) {
 }
 
 async function startScanning() {
-  if (!adapterPoweredOn || scanning) return;
+  if (!adapterPoweredOn || scanning || queueRunning) return;
   try {
     await noble.startScanningAsync([], true);
     scanning = true;
@@ -106,12 +106,12 @@ function enqueuePico(peripheral: Peripheral, picoId: string, localName?: string)
 }
 
 async function recoverScanning() {
-  if (!adapterPoweredOn || scanning) return;
+  if (!adapterPoweredOn || scanning || queueRunning) return;
   await startScanning();
 }
 
 function sweepKnownPicos() {
-  if (!adapterPoweredOn) return;
+  if (!adapterPoweredOn || queueRunning) return;
   const now = Date.now();
 
   for (const [picoId, device] of knownPicos) {
@@ -319,6 +319,11 @@ function registerDisconnectHandler(peripheral: Peripheral, picoId: string) {
 async function processConnectionQueue() {
   if (queueRunning) return;
   queueRunning = true;
+
+  // Keep scanning disabled while connecting and discovering GATT services.
+  // BlueZ/Noble should use the adapter exclusively for the connection flow.
+  await stopScanning();
+
   try {
     while (connectionQueue.length > 0) {
       const item = connectionQueue.shift();
@@ -339,19 +344,20 @@ async function processConnectionQueue() {
         pico.setConnected(true);
         registerDisconnectHandler(item.peripheral, item.picoId);
         await setupPeripheral(item.peripheral, item.picoId, item.localName);
-        console.log(`[BLE] Connection ready: ${item.picoId}`);
+        console.log('[BLE] Connection ready: ' + item.picoId);
       } catch (error) {
         connectedPeripherals.delete(item.picoId);
         connectingPeripherals.delete(item.picoId);
         clearPicoPolling(item.picoId);
         const pico = picoList[item.picoId];
         if (pico) pico.setConnected(false);
-        console.error(`[BLE] Connection flow failed: ${item.picoId}:`, error instanceof Error ? error.message : error);
+        console.error('[BLE] Connection flow failed: ' + item.picoId + ':', error instanceof Error ? error.message : error);
         try { await item.peripheral.disconnectAsync(); } catch (_) {}
       }
     }
   } finally {
     queueRunning = false;
+    if (adapterPoweredOn) await startScanning();
   }
 }
 

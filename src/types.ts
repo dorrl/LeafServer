@@ -4,14 +4,19 @@ export type PicoState = {
     light: number;
 };
 
+export type OptimalRange = {
+    temperature: { min: number; max: number };
+    moisture: { min: number; max: number };
+    light: { min: number; max: number; startTime: string; endTime: string };
+};
+
 export type PicoType = {
     name: string;
     id: string;
     connected: boolean;
     state: PicoState;
+    optimalRange?: OptimalRange;
     updatedAt?: string;
-    // Timestamp of the last sensor message received over BLE. Connection changes
-    // do not change this value, so clients can distinguish an old reading.
     receivedAt?: string;
 };
 
@@ -39,7 +44,6 @@ export type ServerSettings = {
 
 export type Respond = {
     state: number;
-    // Always the newest BLE value held by the server, never a history snapshot.
     source: 'latest-received';
     servedAt: string;
     pico: PicoType[];

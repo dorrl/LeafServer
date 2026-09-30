@@ -40,10 +40,6 @@ function isPicoState(value: unknown): value is PicoState {
     return [state.temperature, state.moisture, state.light].every(item => typeof item === 'number' && Number.isFinite(item));
 }
 
-function isTime(value: unknown): value is string {
-    return typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
-}
-
 function isRange(value: unknown, minAllowed: number, maxAllowed: number): value is { min: number; max: number } {
     if (!value || typeof value !== 'object') return false;
     const range = value as { min?: unknown; max?: unknown };
@@ -59,8 +55,13 @@ function isOptimalRange(value: unknown): value is OptimalRange {
     return isRange(range.temperature, -50, 100)
         && isRange(range.moisture, 0, 100)
         && isRange(range.light, -2, 200_000)
-        && isTime(range.light.startTime)
-        && isTime(range.light.endTime);
+        && typeof range.light.minDurationHours === 'number'
+        && Number.isFinite(range.light.minDurationHours)
+        && typeof range.light.maxDurationHours === 'number'
+        && Number.isFinite(range.light.maxDurationHours)
+        && range.light.minDurationHours >= 0
+        && range.light.maxDurationHours <= 24
+        && range.light.minDurationHours <= range.light.maxDurationHours;
 }
 
 app.get(PARENT + '/', (_req, res) => res.json({ state: 200, service: 'smartfarm-server' }));
@@ -100,7 +101,7 @@ app.post(PARENT + '/picos/:id/optimalRange', requireApiKey, (req, res) => {
     if (!id || !picoList[id]) return res.status(404).json({ error: 'Pico not found' });
     if (!isOptimalRange(req.body)) {
         return res.status(400).json({
-            error: 'Invalid optimal range. temperature/moisture/light require min/max, and light requires startTime/endTime in HH:mm format.'
+            error: 'Invalid optimal range. temperature/moisture/light require min/max, and light also requires minDurationHours/maxDurationHours from 0 to 24.'
         });
     }
 

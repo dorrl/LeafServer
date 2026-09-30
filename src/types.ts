@@ -7,7 +7,7 @@ export type PicoState = {
 export type OptimalRange = {
     temperature: { min: number; max: number };
     moisture: { min: number; max: number };
-    light: { min: number; max: number; startTime: string; endTime: string };
+    light: { min: number; max: number; minDurationHours: number; maxDurationHours: number };
 };
 
 export type PicoType = {
@@ -17,6 +17,9 @@ export type PicoType = {
     state: PicoState;
     optimalRange?: OptimalRange;
     rangeAlertId?: string;
+    lightDurationDate?: string;
+    lightDurationMinutes?: number;
+    lightSampleAt?: string;
     updatedAt?: string;
     receivedAt?: string;
 };

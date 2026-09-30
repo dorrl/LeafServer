@@ -151,6 +151,10 @@ export class Pico {
     }
 
     setOptimalRange(range: OptimalRange) {
+        if (this.rangeAlertId) {
+            const alert = alerts.find(item => item.id === this.rangeAlertId && !item.resolved);
+            if (alert) alert.resolved = true;
+        }
         this.optimalRange = range;
         this.rangeAlertId = undefined;
         persist();
@@ -181,7 +185,12 @@ export function getReadings(picoId: string, limit = 100, period: ReadingPeriod =
         .slice(0, Math.min(limit, 10_000));
 }
 export function getAlerts(): Alert[] { return alerts; }
-export function clearTelemetry() { readings = []; alerts = []; persist(); }
+export function clearTelemetry() {
+    readings = [];
+    alerts = [];
+    Object.values(picoList).forEach(pico => { pico.rangeAlertId = undefined; });
+    persist();
+}
 export function clearAlerts() {
     alerts = [];
     Object.values(picoList).forEach(pico => { pico.rangeAlertId = undefined; });

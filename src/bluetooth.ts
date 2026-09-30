@@ -27,6 +27,7 @@ const PICO_NAME_KEYWORDS = ['smartfarm-pico'];
 const CONNECT_TIMEOUT_MS = 12_000;
 const CONNECT_RETRY_COUNT = 2;
 const CONNECT_RETRY_DELAY_MS = 1_000;
+const DISCOVERY_TIMEOUT_MS = 10_000;
 const RECONNECT_DELAY_MS = 2_000;
 const CONNECTION_SWEEP_INTERVAL_MS = 5_000;
 const SCAN_RECOVERY_INTERVAL_MS = 10_000;
@@ -247,8 +248,33 @@ async function setupPeripheral(peripheral: Peripheral, picoId: string, localName
   const pico = getOrCreatePico(picoId, localName);
   try {
     console.log(`[BLE] Discovering services: ${picoId}`);
-    const { characteristics } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
-    console.log(`[BLE] Services discovered: ${picoId}, characteristics=${characteristics.length}`);
+
+    // Split GATT discovery into service discovery and characteristic discovery.
+    // This avoids relying on Noble's combined discovery operation when the
+    // peripheral is slow to answer individual ATT requests.
+    const services = await Promise.race([
+      peripheral.discoverServicesAsync([]),
+      new Promise<never>((_, reject) => setTimeout(
+        () => reject(new Error(`service discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms`)),
+        DISCOVERY_TIMEOUT_MS
+      ))
+    ]);
+
+    console.log(`[BLE] Services discovered: ${picoId}, services=${services.length}`);
+
+    const characteristics: Characteristic[] = [];
+    for (const service of services) {
+      const serviceCharacteristics = await Promise.race([
+        service.discoverCharacteristicsAsync([]),
+        new Promise<never>((_, reject) => setTimeout(
+          () => reject(new Error(`characteristic discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms`)),
+          DISCOVERY_TIMEOUT_MS
+        ))
+      ]);
+      characteristics.push(...serviceCharacteristics);
+    }
+
+    console.log(`[BLE] Characteristics discovered: ${picoId}, characteristics=${characteristics.length}`);
 
     let hasSubscription = false;
     for (const characteristic of characteristics) {

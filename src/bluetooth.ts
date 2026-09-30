@@ -73,9 +73,9 @@ function getOrCreatePico(picoId: string, localName?: string) {
       state: { temperature: 0, moisture: 0, light: 0 }
     });
     picoList[picoId] = pico;
-  } else if (localName) {
-    pico.name = localName;
   }
+  // Keep the persisted/custom server-side name. The BLE advertised name is
+  // only used when creating a Pico for the first time.
   return pico;
 }
 

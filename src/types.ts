@@ -16,6 +16,7 @@ export type PicoType = {
     connected: boolean;
     state: PicoState;
     optimalRange?: OptimalRange;
+    rangeAlertId?: string;
     updatedAt?: string;
     receivedAt?: string;
 };

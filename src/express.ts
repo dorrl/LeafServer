@@ -122,7 +122,9 @@ app.get(PARENT + '/picos/:id/readings', (req, res) => {
     res.json({ state: 200, readings: getReadings(id, limit, period as ReadingPeriod) });
 });
 
-app.get(PARENT + '/notifications', (_req, res) => res.json({ state: 200, notifications: getAlerts() }));
+app.get(PARENT + '/notifications', (_req, res) => {
+    res.json({ state: 200, notifications: getAlerts().slice(0, 20) });
+});
 
 app.delete(PARENT + '/notifications/delete', requireApiKey, (_req, res) => {
     clearAlerts();

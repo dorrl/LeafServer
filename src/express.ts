@@ -1,7 +1,7 @@
 import express from 'express';
 import http from 'node:http';
-import { Pico, clearTelemetry, getAlerts, getReadings, getSettings, loadPersistedData, picoList, ReadingPeriod, saveState, startStorageScheduler, updateSettings } from './pico.js';
-import { PicoState, PicoType, Respond, ServerSettings } from './types.js';
+import { Pico, clearAlerts, clearTelemetry, getAlerts, getReadings, getSettings, loadPersistedData, picoList, ReadingPeriod, saveState, startStorageScheduler, updateSettings } from './pico.js';
+import { OptimalRange, PicoState, PicoType, Respond, ServerSettings } from './types.js';
 import { config } from 'dotenv'
 
 config()
@@ -15,7 +15,6 @@ startStorageScheduler();
 const app = express();
 app.use(express.json({ limit: '16kb' }));
 app.use((req, res, next) => {
-    // Native clients do not need CORS, but this allows the Expo web build to read monitoring data.
     res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN ?? '*');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -41,11 +40,32 @@ function isPicoState(value: unknown): value is PicoState {
     return [state.temperature, state.moisture, state.light].every(item => typeof item === 'number' && Number.isFinite(item));
 }
 
+function isTime(value: unknown): value is string {
+    return typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function isRange(value: unknown, minAllowed: number, maxAllowed: number): value is { min: number; max: number } {
+    if (!value || typeof value !== 'object') return false;
+    const range = value as { min?: unknown; max?: unknown };
+    return typeof range.min === 'number' && Number.isFinite(range.min)
+        && typeof range.max === 'number' && Number.isFinite(range.max)
+        && range.min <= range.max
+        && range.min >= minAllowed && range.max <= maxAllowed;
+}
+
+function isOptimalRange(value: unknown): value is OptimalRange {
+    if (!value || typeof value !== 'object') return false;
+    const range = value as Partial<OptimalRange>;
+    return isRange(range.temperature, -50, 100)
+        && isRange(range.moisture, 0, 100)
+        && isRange(range.light, -2, 200_000)
+        && isTime(range.light.startTime)
+        && isTime(range.light.endTime);
+}
+
 app.get(PARENT + '/', (_req, res) => res.json({ state: 200, service: 'smartfarm-server' }));
 
 app.get(PARENT + '/state', (_req, res) => {
-    // This endpoint is used by app refresh. Do not read `readings` here: that
-    // collection contains only scheduled history snapshots.
     const pico: PicoType[] = Object.values(picoList).map(device => device.export());
     const response: Respond = { state: 200, source: 'latest-received', servedAt: new Date().toISOString(), pico };
     res.json(response);
@@ -62,9 +82,7 @@ app.post(PARENT + '/picos/:id/setName', requireApiKey, (req, res) => {
     if (!id || !picoList[id]) return res.status(404).json({ error: 'Pico not found' });
 
     const body = req.body as { name?: unknown };
-    if (typeof body.name !== 'string') {
-        return res.status(400).json({ error: 'name must be a string' });
-    }
+    if (typeof body.name !== 'string') return res.status(400).json({ error: 'name must be a string' });
 
     const name = body.name.trim();
     if (!name) return res.status(400).json({ error: 'name must not be empty' });
@@ -74,8 +92,20 @@ app.post(PARENT + '/picos/:id/setName', requireApiKey, (req, res) => {
     pico.name = name;
     pico.updatedAt = new Date().toISOString();
     saveState();
-
     res.json({ state: 200, pico: pico.export() });
+});
+
+app.post(PARENT + '/picos/:id/optimalRange', requireApiKey, (req, res) => {
+    const id = cleanId(req.params.id);
+    if (!id || !picoList[id]) return res.status(404).json({ error: 'Pico not found' });
+    if (!isOptimalRange(req.body)) {
+        return res.status(400).json({
+            error: 'Invalid optimal range. temperature/moisture/light require min/max, and light requires startTime/endTime in HH:mm format.'
+        });
+    }
+
+    picoList[id].setOptimalRange(req.body);
+    res.json({ state: 200, pico: picoList[id].export() });
 });
 
 app.get(PARENT + '/picos/:id/readings', (req, res) => {
@@ -93,7 +123,11 @@ app.get(PARENT + '/picos/:id/readings', (req, res) => {
 
 app.get(PARENT + '/notifications', (_req, res) => res.json({ state: 200, notifications: getAlerts() }));
 
-// Deletes only saved readings and alerts. Registered Pico devices and measurement settings are preserved.
+app.delete(PARENT + '/notifications/delete', requireApiKey, (_req, res) => {
+    clearAlerts();
+    res.json({ state: 200, message: 'Notifications were deleted.' });
+});
+
 app.delete(PARENT + '/data', requireApiKey, (_req, res) => {
     clearTelemetry();
     res.json({ state: 200, message: 'Saved readings and alerts were deleted.' });
@@ -106,9 +140,7 @@ app.post(PARENT + '/settings', requireApiKey, async (req, res) => {
     const measurementIntervalMinutes = body.measurementIntervalMinutes;
     const syncIntervalMinutes = body.syncIntervalMinutes;
     const retentionMonths = body.retentionMonths;
-    if (measurementIntervalMinutes !== 1) {
-        return res.status(400).json({ error: 'measurementIntervalMinutes is fixed at 1' });
-    }
+    if (measurementIntervalMinutes !== 1) return res.status(400).json({ error: 'measurementIntervalMinutes is fixed at 1' });
     if (typeof syncIntervalMinutes !== 'number' || !Number.isInteger(syncIntervalMinutes) || syncIntervalMinutes < 1 || syncIntervalMinutes > 1440) {
         return res.status(400).json({ error: 'syncIntervalMinutes must be an integer from 1 to 1440' });
     }
@@ -119,8 +151,6 @@ app.post(PARENT + '/settings', requireApiKey, async (req, res) => {
     res.json({ state: 200, settings: getSettings() });
 });
 
-// Reserved for a trusted gateway or maintenance tool. Sensor data arriving over BLE
-// updates state directly and never needs this HTTP endpoint.
 app.post(PARENT + '/setPico', requireApiKey, (req, res) => {
     const body = req.body as Partial<PicoType>;
     const id = cleanId(body?.id);
@@ -131,7 +161,7 @@ app.post(PARENT + '/setPico', requireApiKey, (req, res) => {
         let pico = picoList[id];
         if (!pico) {
             if (!body.state) return res.status(400).json({ error: 'State is required when creating a Pico' });
-            pico = new Pico({ id, name: typeof body.name === 'string' ? body.name.slice(0, 80) : `Pico-${id}`, connected: Boolean(body.connected), state: body.state });
+            pico = new Pico({ id, name: typeof body.name === 'string' ? body.name.slice(0, 80) : 'Pico-' + id, connected: Boolean(body.connected), state: body.state });
             picoList[id] = pico;
         } else {
             if (typeof body.name === 'string') pico.name = body.name.slice(0, 80);
@@ -147,5 +177,5 @@ app.post(PARENT + '/setPico', requireApiKey, (req, res) => {
 
 http.createServer(app).listen(PORT, '0.0.0.0', () => {
     if (!API_KEY) console.warn('[Security] Write endpoints are disabled until SMARTFARM_API_KEY is configured.');
-    console.log(`SmartFarm HTTP server is listening on port ${PORT}`);
+    console.log('SmartFarm HTTP server is listening on port ' + PORT);
 });

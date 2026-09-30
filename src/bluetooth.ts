@@ -263,7 +263,13 @@ async function setupPeripheral(peripheral: Peripheral, picoId: string, localName
     console.log(`[BLE] Services discovered: ${picoId}, services=${services.length}`);
 
     const characteristics: Characteristic[] = [];
-    for (const service of services) {
+    const discoverableServices = services.filter((service: any) => {
+      const uuid = String(service.uuid || '').toLowerCase().replace(/-/g, '');
+      // GAP/GATT services do not contain the Pico sensor UART characteristics.
+      return uuid !== '1800' && uuid !== '1801';
+    });
+
+    for (const service of discoverableServices) {
       const serviceCharacteristics = await Promise.race([
         service.discoverCharacteristicsAsync([]),
         new Promise<never>((_, reject) => setTimeout(
@@ -274,7 +280,9 @@ async function setupPeripheral(peripheral: Peripheral, picoId: string, localName
       characteristics.push(...serviceCharacteristics);
     }
 
-    console.log(`[BLE] Characteristics discovered: ${picoId}, characteristics=${characteristics.length}`);
+    console.log(
+      `[BLE] Characteristics discovered: ${picoId}, services=${discoverableServices.length}, characteristics=${characteristics.length}`
+    );
 
     let hasSubscription = false;
     for (const characteristic of characteristics) {

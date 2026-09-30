@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Alert, PicoState, PicoType, Reading, ServerSettings } from './types.js';
+import { Alert, OptimalRange, PicoState, PicoType, Reading, ServerSettings } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, '../data');
@@ -30,16 +30,56 @@ function pruneReadings() {
     readings = readings.filter(reading => new Date(reading.recordedAt).getTime() >= cutoff);
 }
 
-function addAlert(pico: Pico) {
-    const problems: Array<[string, Alert['level']]> = [];
-    if (pico.state.temperature < 15 || pico.state.temperature > 30) problems.push([`Temperature out of range: ${pico.state.temperature}°C`, 'warning']);
-    if (pico.state.moisture < 30) problems.push([`Soil moisture is low: ${pico.state.moisture}%`, 'warning']);
-    for (const [message, level] of problems) {
-        if (!alerts.some(alert => alert.picoId === pico.id && alert.message === message && !alert.resolved)) {
-            alerts.unshift({ id: crypto.randomUUID(), picoId: pico.id, message, level, createdAt: new Date().toISOString(), resolved: false });
-        }
+function isTimeInRange(time: string, start: string, end: string): boolean {
+    if (start === end) return true;
+    return start < end ? time >= start && time <= end : time >= start || time <= end;
+}
+
+function getOutOfRangeItems(pico: Pico): string[] {
+    const range = pico.optimalRange;
+    if (!range) return [];
+
+    const items: string[] = [];
+    const { temperature, moisture, light } = pico.state;
+
+    if (temperature < range.temperature.min || temperature > range.temperature.max) {
+        items.push('temperature ' + temperature + '°C (normal ' + range.temperature.min + '~' + range.temperature.max + '°C)');
     }
-    if (!problems.length) alerts.filter(alert => alert.picoId === pico.id && !alert.resolved).forEach(alert => { alert.resolved = true; });
+    if (moisture < range.moisture.min || moisture > range.moisture.max) {
+        items.push('moisture ' + moisture + '% (normal ' + range.moisture.min + '~' + range.moisture.max + '%)');
+    }
+
+    const currentTime = new Date().toTimeString().slice(0, 5);
+    if (isTimeInRange(currentTime, range.light.startTime, range.light.endTime) &&
+        (light < range.light.min || light > range.light.max)) {
+        items.push('light ' + light + 'lx (normal ' + range.light.min + '~' + range.light.max + 'lx)');
+    }
+    return items;
+}
+
+function updateRangeAlert(pico: Pico) {
+    const items = getOutOfRangeItems(pico);
+    const existing = pico.rangeAlertId
+        ? alerts.find(alert => alert.picoId === pico.id && alert.id === pico.rangeAlertId && !alert.resolved)
+        : undefined;
+
+    if (items.length > 0) {
+        if (!existing) {
+            const alert: Alert = {
+                id: crypto.randomUUID(),
+                picoId: pico.id,
+                message: 'Values out of optimal range: ' + items.join(', '),
+                level: 'warning',
+                createdAt: new Date().toISOString(),
+                resolved: false
+            };
+            alerts.unshift(alert);
+            pico.rangeAlertId = alert.id;
+        }
+    } else if (existing) {
+        existing.resolved = true;
+        pico.rangeAlertId = undefined;
+    }
     alerts = alerts.slice(0, 500);
 }
 
@@ -47,7 +87,7 @@ function persist() {
     pruneReadings();
     fs.mkdirSync(dataDir, { recursive: true });
     const data: PersistedData = { picos: Object.values(picoList).map(pico => pico.export()), readings, alerts, settings };
-    const temporaryFile = `${dataFile}.tmp`;
+    const temporaryFile = dataFile + '.tmp';
     fs.writeFileSync(temporaryFile, JSON.stringify(data, null, 2), 'utf8');
     fs.renameSync(temporaryFile, dataFile);
 }
@@ -57,28 +97,62 @@ export class Pico {
     id: string;
     connected: boolean;
     state: PicoState;
+    optimalRange?: OptimalRange;
+    rangeAlertId?: string;
     updatedAt: string;
     receivedAt: string;
+
     constructor(pico: PicoType) {
         if (!validState(pico.state)) throw new Error('Invalid sensor state');
-        this.name = pico.name; this.id = pico.id; this.connected = pico.connected; this.state = pico.state;
+        this.name = pico.name;
+        this.id = pico.id;
+        this.connected = pico.connected;
+        this.state = pico.state;
+        this.optimalRange = pico.optimalRange;
+        this.rangeAlertId = pico.rangeAlertId;
         this.updatedAt = pico.updatedAt ?? new Date().toISOString();
-        // Older saved files do not have receivedAt, so retain their known timestamp.
         this.receivedAt = pico.receivedAt ?? this.updatedAt;
     }
+
     export(): PicoType {
-        return { name: this.name, id: this.id, connected: this.connected, state: this.state, updatedAt: this.updatedAt, receivedAt: this.receivedAt };
+        return {
+            name: this.name,
+            id: this.id,
+            connected: this.connected,
+            state: this.state,
+            optimalRange: this.optimalRange,
+            rangeAlertId: this.rangeAlertId,
+            updatedAt: this.updatedAt,
+            receivedAt: this.receivedAt
+        };
     }
+
     setState(state: PicoState) {
         if (!validState(state)) throw new Error('Sensor values are outside the allowed range');
         this.state = state;
         this.receivedAt = new Date().toISOString();
         this.updatedAt = this.receivedAt;
-        addAlert(this); persist();
+        updateRangeAlert(this);
+        persist();
     }
+
     setConnected(connected: boolean) {
-        this.connected = connected; this.updatedAt = new Date().toISOString();
-        if (!connected) alerts.unshift({ id: crypto.randomUUID(), picoId: this.id, message: 'Device disconnected', level: 'error', createdAt: this.updatedAt, resolved: false });
+        this.connected = connected;
+        this.updatedAt = new Date().toISOString();
+        if (!connected) alerts.unshift({
+            id: crypto.randomUUID(),
+            picoId: this.id,
+            message: 'Device disconnected',
+            level: 'error',
+            createdAt: this.updatedAt,
+            resolved: false
+        });
+        persist();
+    }
+
+    setOptimalRange(range: OptimalRange) {
+        this.optimalRange = range;
+        this.rangeAlertId = undefined;
         persist();
     }
 }
@@ -108,7 +182,11 @@ export function getReadings(picoId: string, limit = 100, period: ReadingPeriod =
 }
 export function getAlerts(): Alert[] { return alerts; }
 export function clearTelemetry() { readings = []; alerts = []; persist(); }
-export function clearAlerts() { alerts = []; persist(); }
+export function clearAlerts() {
+    alerts = [];
+    Object.values(picoList).forEach(pico => { pico.rangeAlertId = undefined; });
+    persist();
+}
 export function getSettings(): ServerSettings { return { ...settings }; }
 export function saveLatestReadings() {
     const recordedAt = new Date().toISOString();
@@ -131,6 +209,7 @@ export function updateSettings(next: ServerSettings) {
     pruneReadings();
     persist();
 }
+
 export function loadPersistedData() {
     if (!fs.existsSync(dataFile)) return;
     try {

@@ -30,56 +30,85 @@ function pruneReadings() {
     readings = readings.filter(reading => new Date(reading.recordedAt).getTime() >= cutoff);
 }
 
-function isTimeInRange(time: string, start: string, end: string): boolean {
-    if (start === end) return true;
-    return start < end ? time >= start && time <= end : time >= start || time <= end;
+function isLightInRange(pico: Pico): boolean {
+    const range = pico.optimalRange;
+    if (!range) return false;
+    return pico.state.light >= range.light.min && pico.state.light <= range.light.max;
 }
 
-function getOutOfRangeItems(pico: Pico): string[] {
+function getDurationViolation(pico: Pico, durationMinutes: number, dayEnded: boolean): string | undefined {
+    const range = pico.optimalRange;
+    if (!range) return undefined;
+    const durationHours = durationMinutes / 60;
+    if (durationHours > range.light.maxDurationHours) {
+        return 'light duration ' + durationHours.toFixed(1) + 'h (normal ' + range.light.minDurationHours + '~' + range.light.maxDurationHours + 'h/day)';
+    }
+    if (dayEnded && durationHours < range.light.minDurationHours) {
+        return 'light duration ' + durationHours.toFixed(1) + 'h (normal ' + range.light.minDurationHours + '~' + range.light.maxDurationHours + 'h/day)';
+    }
+    return undefined;
+}
+
+function getOutOfRangeItems(pico: Pico, lightDurationMinutes = pico.lightDurationMinutes, dayEnded = false): string[] {
     const range = pico.optimalRange;
     if (!range) return [];
-
     const items: string[] = [];
-    const { temperature, moisture, light } = pico.state;
-
+    const { temperature, moisture } = pico.state;
     if (temperature < range.temperature.min || temperature > range.temperature.max) {
         items.push('temperature ' + temperature + '°C (normal ' + range.temperature.min + '~' + range.temperature.max + '°C)');
     }
     if (moisture < range.moisture.min || moisture > range.moisture.max) {
         items.push('moisture ' + moisture + '% (normal ' + range.moisture.min + '~' + range.moisture.max + '%)');
     }
-
-    const currentTime = new Date().toTimeString().slice(0, 5);
-    if (isTimeInRange(currentTime, range.light.startTime, range.light.endTime) &&
-        (light < range.light.min || light > range.light.max)) {
-        items.push('light ' + light + 'lx (normal ' + range.light.min + '~' + range.light.max + 'lx)');
-    }
+    const durationViolation = getDurationViolation(pico, lightDurationMinutes, dayEnded);
+    if (durationViolation) items.push(durationViolation);
     return items;
 }
 
-function updateRangeAlert(pico: Pico) {
-    const items = getOutOfRangeItems(pico);
+function createRangeAlert(pico: Pico, items: string[]) {
+    const alert: Alert = {
+        id: crypto.randomUUID(),
+        picoId: pico.id,
+        message: 'Values out of optimal range: ' + items.join(', '),
+        level: 'warning',
+        createdAt: new Date().toISOString(),
+        resolved: false
+    };
+    alerts.unshift(alert);
+    pico.rangeAlertId = alert.id;
+}
+
+function updateRangeAlert(pico: Pico, dayEnded = false, previousDayDurationMinutes?: number) {
+    const previousDayViolation = previousDayDurationMinutes === undefined
+        ? undefined
+        : getDurationViolation(pico, previousDayDurationMinutes, true);
+
     const existing = pico.rangeAlertId
         ? alerts.find(alert => alert.picoId === pico.id && alert.id === pico.rangeAlertId && !alert.resolved)
         : undefined;
 
-    if (items.length > 0) {
-        if (!existing) {
-            const alert: Alert = {
-                id: crypto.randomUUID(),
-                picoId: pico.id,
-                message: 'Values out of optimal range: ' + items.join(', '),
-                level: 'warning',
-                createdAt: new Date().toISOString(),
-                resolved: false
-            };
-            alerts.unshift(alert);
-            pico.rangeAlertId = alert.id;
-        }
-    } else if (existing) {
+    if (dayEnded && existing) {
         existing.resolved = true;
         pico.rangeAlertId = undefined;
     }
+
+    if (previousDayViolation) {
+        createRangeAlert(pico, [previousDayViolation]);
+        pico.rangeAlertId = undefined;
+    }
+
+    const activeItems = getOutOfRangeItems(pico, pico.lightDurationMinutes, false);
+    const activeExisting = pico.rangeAlertId
+        ? alerts.find(alert => alert.picoId === pico.id && alert.id === pico.rangeAlertId && !alert.resolved)
+        : undefined;
+
+    if (activeItems.length > 0) {
+        if (!activeExisting) createRangeAlert(pico, activeItems);
+    } else if (activeExisting) {
+        activeExisting.resolved = true;
+        pico.rangeAlertId = undefined;
+    }
+
     alerts = alerts.slice(0, 500);
 }
 
@@ -99,6 +128,9 @@ export class Pico {
     state: PicoState;
     optimalRange?: OptimalRange;
     rangeAlertId?: string;
+    lightDurationDate: string;
+    lightDurationMinutes: number;
+    lightSampleAt: string;
     updatedAt: string;
     receivedAt: string;
 
@@ -110,8 +142,12 @@ export class Pico {
         this.state = pico.state;
         this.optimalRange = pico.optimalRange;
         this.rangeAlertId = pico.rangeAlertId;
-        this.updatedAt = pico.updatedAt ?? new Date().toISOString();
+        const now = new Date().toISOString();
+        this.updatedAt = pico.updatedAt ?? now;
         this.receivedAt = pico.receivedAt ?? this.updatedAt;
+        this.lightDurationDate = pico.lightDurationDate ?? this.receivedAt.slice(0, 10);
+        this.lightDurationMinutes = Number.isFinite(pico.lightDurationMinutes) ? pico.lightDurationMinutes! : 0;
+        this.lightSampleAt = pico.lightSampleAt ?? this.receivedAt;
     }
 
     export(): PicoType {
@@ -122,6 +158,9 @@ export class Pico {
             state: this.state,
             optimalRange: this.optimalRange,
             rangeAlertId: this.rangeAlertId,
+            lightDurationDate: this.lightDurationDate,
+            lightDurationMinutes: this.lightDurationMinutes,
+            lightSampleAt: this.lightSampleAt,
             updatedAt: this.updatedAt,
             receivedAt: this.receivedAt
         };
@@ -129,10 +168,35 @@ export class Pico {
 
     setState(state: PicoState) {
         if (!validState(state)) throw new Error('Sensor values are outside the allowed range');
+        const receivedAt = new Date().toISOString();
+        const previousSampleAt = new Date(this.lightSampleAt).getTime();
+        const currentSampleAt = new Date(receivedAt).getTime();
+        const currentDate = receivedAt.slice(0, 10);
+        let dayEnded = false;
+        let previousDayDurationMinutes: number | undefined;
+
+        if (Number.isFinite(previousSampleAt) && currentSampleAt > previousSampleAt && this.optimalRange) {
+            const elapsedMinutes = Math.min((currentSampleAt - previousSampleAt) / 60_000, 5);
+            if (this.lightDurationDate === currentDate) {
+                if (isLightInRange(this)) this.lightDurationMinutes += elapsedMinutes;
+            } else {
+                dayEnded = true;
+                previousDayDurationMinutes = this.lightDurationMinutes;
+                this.lightDurationDate = currentDate;
+                this.lightDurationMinutes = 0;
+            }
+        } else if (this.lightDurationDate !== currentDate) {
+            dayEnded = true;
+            previousDayDurationMinutes = this.lightDurationMinutes;
+            this.lightDurationDate = currentDate;
+            this.lightDurationMinutes = 0;
+        }
+
         this.state = state;
-        this.receivedAt = new Date().toISOString();
-        this.updatedAt = this.receivedAt;
-        updateRangeAlert(this);
+        this.receivedAt = receivedAt;
+        this.updatedAt = receivedAt;
+        this.lightSampleAt = receivedAt;
+        updateRangeAlert(this, dayEnded, previousDayDurationMinutes);
         persist();
     }
 
@@ -157,6 +221,10 @@ export class Pico {
         }
         this.optimalRange = range;
         this.rangeAlertId = undefined;
+        const now = new Date().toISOString();
+        this.lightDurationDate = now.slice(0, 10);
+        this.lightDurationMinutes = 0;
+        this.lightSampleAt = now;
         persist();
     }
 }
@@ -188,7 +256,13 @@ export function getAlerts(): Alert[] { return alerts; }
 export function clearTelemetry() {
     readings = [];
     alerts = [];
-    Object.values(picoList).forEach(pico => { pico.rangeAlertId = undefined; });
+    Object.values(picoList).forEach(pico => {
+        pico.rangeAlertId = undefined;
+        const now = new Date().toISOString();
+        pico.lightDurationDate = now.slice(0, 10);
+        pico.lightDurationMinutes = 0;
+        pico.lightSampleAt = now;
+    });
     persist();
 }
 export function clearAlerts() {

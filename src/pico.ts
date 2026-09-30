@@ -108,6 +108,7 @@ export function getReadings(picoId: string, limit = 100, period: ReadingPeriod =
 }
 export function getAlerts(): Alert[] { return alerts; }
 export function clearTelemetry() { readings = []; alerts = []; persist(); }
+export function clearAlerts() { alerts = []; persist(); }
 export function getSettings(): ServerSettings { return { ...settings }; }
 export function saveLatestReadings() {
     const recordedAt = new Date().toISOString();

@@ -1,6 +1,11 @@
 import noble from '@abandonware/noble';
-import { BleRuntime } from './types.js';
-import { startScanning, stopScanning, setupScanner } from './scanner.js';
+import { picoList } from './pico.js';
+import { BleRuntime } from './bluetooth/types.js';
+import { startScanning, setupScanner } from './bluetooth/scanner.js';
+
+let scanning = false;
+let queueRunning = false;
+let adapterPoweredOn = false;
 
 const runtime: BleRuntime = {
   connectedPeripherals: new Map(),
@@ -17,10 +22,6 @@ const runtime: BleRuntime = {
   isAdapterPoweredOn: () => adapterPoweredOn
 };
 
-let scanning = false;
-let queueRunning = false;
-let adapterPoweredOn = false;
-
 setupScanner(runtime);
 
 noble.on('stateChange', async state => {
@@ -36,7 +37,6 @@ noble.on('stateChange', async state => {
   for (const timer of runtime.reconnectTimers.values()) clearTimeout(timer);
   runtime.reconnectTimers.clear();
 
-  const { picoList } = await import('../pico.js');
   for (const picoId of runtime.connectedPeripherals.keys()) {
     const pico = picoList[picoId];
     if (pico) pico.setConnected(false);

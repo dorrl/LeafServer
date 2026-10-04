@@ -1,5 +1,14 @@
 import noble from '@abandonware/noble';
-import { BleRuntime, PICO_NAME_KEYWORDS, KNOWN_PICO_STALE_MS, Peripheral, normalizePicoId, SCAN_RECOVERY_INTERVAL_MS, CONNECTION_SWEEP_INTERVAL_MS } from './types.js';
+import {
+  BleRuntime,
+  PICO_NAME_KEYWORDS,
+  KNOWN_PICO_STALE_MS,
+  Peripheral,
+  normalizePicoId,
+  SCAN_RECOVERY_INTERVAL_MS,
+  CONNECTION_SWEEP_INTERVAL_MS,
+  BLE_RESCAN_INTERVAL_MS
+} from './types.js';
 import { enqueuePico, sweepKnownPicos } from './connection.js';
 
 export async function startScanning(runtime: BleRuntime) {
@@ -23,6 +32,14 @@ export async function stopScanning(runtime: BleRuntime) {
   }
 }
 
+async function restartScanning(runtime: BleRuntime) {
+  if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
+
+  console.log('[BLE] Restarting BLE scan');
+  await stopScanning(runtime);
+  await startScanning(runtime);
+}
+
 export function setupScanner(runtime: BleRuntime) {
   noble.on('discover', (peripheral: Peripheral) => {
     const localName = peripheral.advertisement.localName;
@@ -44,10 +61,15 @@ export function setupScanner(runtime: BleRuntime) {
   });
 
   setInterval(() => sweepKnownPicos(runtime), CONNECTION_SWEEP_INTERVAL_MS);
+
   setInterval(() => {
     if (!runtime.isAdapterPoweredOn() || runtime.getScanning() || runtime.getQueueRunning()) return;
     void startScanning(runtime);
   }, SCAN_RECOVERY_INTERVAL_MS);
+
+  setInterval(() => {
+    void restartScanning(runtime);
+  }, BLE_RESCAN_INTERVAL_MS);
 }
 
 export async function recoverScanning(runtime: BleRuntime) {

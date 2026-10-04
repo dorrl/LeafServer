@@ -31,9 +31,7 @@ export function enqueuePico(runtime: BleRuntime, peripheral: Peripheral, picoId:
 
 export function sweepKnownPicos(runtime: BleRuntime) {
   if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
-  const now = Date.now();
   for (const [picoId, device] of runtime.knownPicos) {
-    if (now - device.lastSeenAt > 60_000) { runtime.knownPicos.delete(picoId); continue; }
     if (!runtime.connectedPeripherals.has(picoId) && !runtime.connectingPeripherals.has(picoId) && !runtime.queuedPicos.has(picoId)) {
       enqueuePico(runtime, device.peripheral, picoId, device.localName);
     }
@@ -98,6 +96,7 @@ export async function processConnectionQueue(runtime: BleRuntime) {
         const pico = picoList[item.picoId];
         if (pico) pico.setConnected(false);
         console.error(`[BLE] Connection flow failed: ${item.picoId}:`, error instanceof Error ? error.message : error);
+        scheduleReconnect(runtime, item.picoId);
         try { await item.peripheral.disconnectAsync(); } catch (_) {}
       }
     }

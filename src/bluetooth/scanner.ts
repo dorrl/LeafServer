@@ -12,10 +12,25 @@ import {
 import { enqueuePico, sweepKnownPicos } from './connection.js';
 
 export async function startScanning(runtime: BleRuntime) {
-  if (!runtime.isAdapterPoweredOn() || runtime.getScanning() || runtime.getQueueRunning()) return;
+  if (!runtime.isAdapterPoweredOn()) {
+    console.log('[BLE] Scan skipped: adapter is not powered on');
+    return;
+  }
+
+  if (runtime.getScanning()) {
+    console.log('[BLE] Scan skipped: scan is already running');
+    return;
+  }
+
+  if (runtime.getQueueRunning()) {
+    console.log('[BLE] Scan skipped: connection queue is running');
+    return;
+  }
+
   try {
     await noble.startScanningAsync([], true);
     runtime.setScanning(true);
+    console.log('[BLE] Scan started');
   } catch (error) {
     console.error('[BLE] Failed to start scan:', error instanceof Error ? error.message : error);
   }
@@ -33,7 +48,19 @@ export async function stopScanning(runtime: BleRuntime) {
 }
 
 async function restartScanning(runtime: BleRuntime) {
-  if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
+  console.log(
+    `[BLE] Rescan timer fired: scanning=${runtime.getScanning()}, queueRunning=${runtime.getQueueRunning()}, adapterPoweredOn=${runtime.isAdapterPoweredOn()}`
+  );
+
+  if (!runtime.isAdapterPoweredOn()) {
+    console.log('[BLE] Rescan skipped: adapter is not powered on');
+    return;
+  }
+
+  if (runtime.getQueueRunning()) {
+    console.log('[BLE] Rescan skipped: connection queue is running');
+    return;
+  }
 
   console.log('[BLE] Restarting BLE scan');
   await stopScanning(runtime);

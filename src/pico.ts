@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Alert, OptimalRange, PicoState, PicoType, Reading, ServerSettings } from './types.js';
+import { sendFcmNotification } from './fcm.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, '../data');
@@ -76,6 +77,9 @@ function createRangeAlert(pico: Pico, items: string[]) {
     };
     alerts.unshift(alert);
     pico.rangeAlertId = alert.id;
+    void sendFcmNotification(alert).catch(error => {
+        console.error('[FCM] Failed to send notification:', error instanceof Error ? error.message : error);
+    });
 }
 
 function updateRangeAlert(pico: Pico, dayEnded = false, previousDayDurationMinutes?: number) {
@@ -203,14 +207,20 @@ export class Pico {
     setConnected(connected: boolean) {
         this.connected = connected;
         this.updatedAt = new Date().toISOString();
-        if (!connected) alerts.unshift({
-            id: crypto.randomUUID(),
-            picoId: this.id,
-            message: 'Device disconnected',
-            level: 'error',
-            createdAt: this.updatedAt,
-            resolved: false
-        });
+        if (!connected) {
+            const alert: Alert = {
+                id: crypto.randomUUID(),
+                picoId: this.id,
+                message: 'Device disconnected',
+                level: 'error',
+                createdAt: this.updatedAt,
+                resolved: false
+            };
+            alerts.unshift(alert);
+            void sendFcmNotification(alert).catch(error => {
+                console.error('[FCM] Failed to send notification:', error instanceof Error ? error.message : error);
+            });
+        }
         persist();
     }
 

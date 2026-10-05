@@ -78,7 +78,7 @@ function createRangeAlert(pico: Pico, items: string[]) {
     };
     alerts.unshift(alert);
     pico.rangeAlertId = alert.id;
-    void sendFcmNotification(alert).catch(error => {
+    void sendFcmNotification(alert, pico.name).catch(error => {
         console.error('[FCM] Failed to send notification:', error instanceof Error ? error.message : error);
     });
 }
@@ -218,7 +218,7 @@ export class Pico {
                 resolved: false
             };
             alerts.unshift(alert);
-            void sendFcmNotification(alert).catch(error => {
+            void sendFcmNotification(alert, this.name).catch(error => {
                 console.error('[FCM] Failed to send notification:', error instanceof Error ? error.message : error);
             });
         }

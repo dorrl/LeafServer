@@ -94,24 +94,36 @@ export function getFcmTokenCount(): number {
 export async function sendFcmNotification(alert: Alert, picoName: string): Promise<void> {
     if (tokens.length === 0 || !ensureInitialized()) return;
 
-    const response = await getMessaging().sendEachForMulticast({
-        tokens,
-        notification: {
-            title: SERVER_NAME + ' · ' + picoName,
-            body: alert.message,
-        },
-        data: {
-            serverId: SERVER_ID,
-            picoId: alert.picoId,
-            alertId: alert.id,
-        },
-    });
+    const messaging = getMessaging();
+    const results = await Promise.all(tokens.map(async token => {
+        try {
+            await messaging.send({
+                token,
+                notification: {
+                    title: SERVER_NAME + ' · ' + picoName,
+                    body: alert.message,
+                },
+                data: {
+                    serverId: SERVER_ID,
+                    picoId: alert.picoId,
+                },
+            });
+            return { token, success: true, code: undefined };
+        } catch (error) {
+            return {
+                token,
+                success: false,
+                code: error && typeof error === 'object' && 'code' in error
+                    ? String(error.code)
+                    : undefined,
+            };
+        }
+    }));
 
-    const invalidTokens = response.responses
-        .map((result, index) => result.success ? null : ({ token: tokens[index], code: result.error?.code }))
-        .filter((item): item is { token: string; code?: string } => item !== null)
-        .filter(item => item.code === 'messaging/registration-token-not-registered' || item.code === 'messaging/invalid-registration-token')
-        .map(item => item.token);
+    const invalidTokens = results
+        .filter(result => !result.success)
+        .filter(result => result.code === 'messaging/registration-token-not-registered' || result.code === 'messaging/invalid-registration-token')
+        .map(result => result.token);
 
     if (invalidTokens.length > 0) {
         const invalidSet = new Set(invalidTokens);
@@ -120,7 +132,8 @@ export async function sendFcmNotification(alert: Alert, picoName: string): Promi
         console.log('[FCM] Removed ' + invalidTokens.length + ' invalid device token(s)');
     }
 
-    if (response.failureCount > 0) {
-        console.error('[FCM] Notification send completed with ' + response.failureCount + ' failure(s)');
+    const failureCount = results.filter(result => !result.success).length;
+    if (failureCount > 0) {
+        console.error('[FCM] Notification send completed with ' + failureCount + ' failure(s)');
     }
 }

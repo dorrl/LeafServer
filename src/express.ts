@@ -3,6 +3,7 @@ import http from 'node:http';
 import { Pico, clearAlerts, clearTelemetry, getAlerts, getReadings, getSettings, loadPersistedData, picoList, ReadingPeriod, saveState, startStorageScheduler, updateSettings } from './pico.js';
 import { OptimalRange, PicoState, PicoType, Respond, ServerSettings } from './types.js';
 import { config } from 'dotenv'
+import { getFcmTokenCount, registerFcmToken, unregisterFcmToken } from './fcm.js';
 
 config()
 const PORT = Number(process.env.PORT) || Number(process.argv[2]) || 3000;
@@ -124,6 +125,35 @@ app.get(PARENT + '/picos/:id/readings', (req, res) => {
 
 app.get(PARENT + '/notifications', (_req, res) => {
     res.json({ state: 200, notifications: getAlerts().slice(0, 20) });
+});
+
+
+app.post(PARENT + '/notifications/device', requireApiKey, (req, res) => {
+    const body = req.body as { token?: unknown };
+    if (typeof body.token !== 'string' || !body.token.trim()) {
+        return res.status(400).json({ error: 'token must be a non-empty string' });
+    }
+
+    try {
+        const count = registerFcmToken(body.token);
+        res.json({ state: 200, registered: true, deviceCount: count });
+    } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid FCM token' });
+    }
+});
+
+app.delete(PARENT + '/notifications/device', requireApiKey, (req, res) => {
+    const body = req.body as { token?: unknown };
+    if (typeof body.token !== 'string' || !body.token.trim()) {
+        return res.status(400).json({ error: 'token must be a non-empty string' });
+    }
+
+    const count = unregisterFcmToken(body.token);
+    res.json({ state: 200, registered: false, deviceCount: count });
+});
+
+app.get(PARENT + '/notifications/device', requireApiKey, (_req, res) => {
+    res.json({ state: 200, deviceCount: getFcmTokenCount() });
 });
 
 app.delete(PARENT + '/notifications/delete', requireApiKey, (_req, res) => {

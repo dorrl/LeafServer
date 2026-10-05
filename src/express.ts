@@ -129,13 +129,13 @@ app.get(PARENT + '/notifications', (_req, res) => {
 
 
 app.post(PARENT + '/notifications/device', requireApiKey, (req, res) => {
-    const body = req.body as { token?: unknown };
-    if (typeof body.token !== 'string' || !body.token.trim()) {
-        return res.status(400).json({ error: 'token must be a non-empty string' });
+    const body = req.body as { token?: unknown; platform?: unknown; serverId?: unknown };
+    if (typeof body.token !== 'string' || !body.token.trim() || typeof body.serverId !== 'string' || !body.serverId.trim()) {
+        return res.status(400).json({ error: 'token and serverId must be non-empty strings' });
     }
 
     try {
-        const count = registerFcmToken(body.token);
+        const count = registerFcmToken(body.token, body.serverId);
         res.json({ state: 200, registered: true, deviceCount: count });
     } catch (error) {
         res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid FCM token' });

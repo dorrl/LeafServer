@@ -8,7 +8,7 @@ import { getFcmTokenCount, registerFcmToken, unregisterFcmToken } from './fcm.js
 config()
 const PORT = Number(process.env.PORT) || Number(process.argv[2]) || 3000;
 const PARENT = process.env.PARENT || ''
-const API_KEY = process.env.SMARTFARM_API_KEY;
+const API_KEY = process.env.LEAF_API_KEY ?? process.env.SMARTFARM_API_KEY;
 
 loadPersistedData();
 startStorageScheduler();
@@ -24,7 +24,7 @@ app.use((req, res, next) => {
 });
 
 function requireApiKey(req: express.Request, res: express.Response, next: express.NextFunction) {
-    if (!API_KEY) return res.status(503).json({ error: 'SMARTFARM_API_KEY is not configured' });
+    if (!API_KEY) return res.status(503).json({ error: 'LEAF_API_KEY is not configured' });
     if (req.get('X-API-Key') !== API_KEY) return res.status(401).json({ error: 'Invalid API key' });
     next();
 }
@@ -65,7 +65,7 @@ function isOptimalRange(value: unknown): value is OptimalRange {
         && range.light.minDurationHours <= range.light.maxDurationHours;
 }
 
-app.get(PARENT + '/', (_req, res) => res.json({ state: 200, service: 'smartfarm-server' }));
+app.get(PARENT + '/', (_req, res) => res.json({ state: 200, service: 'leaf-server' }));
 
 app.get(PARENT + '/state', (_req, res) => {
     const pico: PicoType[] = Object.values(picoList).map(device => device.export());
@@ -209,6 +209,6 @@ app.post(PARENT + '/setPico', requireApiKey, (req, res) => {
 });
 
 http.createServer(app).listen(PORT, '0.0.0.0', () => {
-    if (!API_KEY) console.warn('[Security] Write endpoints are disabled until SMARTFARM_API_KEY is configured.');
+    if (!API_KEY) console.warn('[Security] Write endpoints are disabled until LEAF_API_KEY is configured.');
     console.log('SmartFarm HTTP server is listening on port ' + PORT);
 });

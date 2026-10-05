@@ -9,6 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, '../data');
 const tokenFile = path.join(dataDir, 'fcm-tokens.json');
 const SERVER_ID = process.env.LEAF_SERVER_ID ?? process.env.SMARTFARM_SERVER_ID ?? 'default';
+const SERVER_NAME = process.env.LEAF_SERVER_NAME ?? process.env.LEAF_SERVER_ID ?? process.env.SMARTFARM_SERVER_ID ?? 'Leaf';
 
 type FcmTokenStore = { tokens: string[] };
 let tokens = loadTokens();
@@ -90,21 +91,19 @@ export function getFcmTokenCount(): number {
     return tokens.length;
 }
 
-export async function sendFcmNotification(alert: Alert): Promise<void> {
+export async function sendFcmNotification(alert: Alert, picoName: string): Promise<void> {
     if (tokens.length === 0 || !ensureInitialized()) return;
 
     const response = await getMessaging().sendEachForMulticast({
         tokens,
         notification: {
-            title: 'Leaf 알림',
+            title: SERVER_NAME + ' · ' + picoName,
             body: alert.message,
         },
         data: {
             serverId: SERVER_ID,
             picoId: alert.picoId,
             alertId: alert.id,
-            level: alert.level,
-            createdAt: alert.createdAt,
         },
     });
 

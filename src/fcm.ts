@@ -8,7 +8,7 @@ import type { Alert } from './types.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, '../data');
 const tokenFile = path.join(dataDir, 'fcm-tokens.json');
-const SERVER_ID = process.env.SMARTFARM_SERVER_ID ?? 'default';
+const SERVER_ID = process.env.LEAF_SERVER_ID ?? process.env.SMARTFARM_SERVER_ID ?? 'default';
 
 type FcmTokenStore = { tokens: string[] };
 let tokens = loadTokens();

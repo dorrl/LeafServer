@@ -8,20 +8,24 @@ import type { Alert } from './types.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, '../data');
 const tokenFile = path.join(dataDir, 'fcm-tokens.json');
-const SERVER_ID = process.env.LEAF_SERVER_ID ?? process.env.SMARTFARM_SERVER_ID ?? 'default';
-const SERVER_NAME = process.env.LEAF_SERVER_NAME ?? process.env.LEAF_SERVER_ID ?? process.env.SMARTFARM_SERVER_ID ?? 'Leaf';
-
-type FcmTokenStore = { tokens: string[] };
-let tokens = loadTokens();
+type FcmDevice = { token: string; serverId: string };
+type FcmTokenStore = { devices: FcmDevice[] };
+let devices = loadDevices();
 let initialized = false;
 let initializationFailed = false;
 
-function loadTokens(): string[] {
+function loadDevices(): FcmDevice[] {
     if (!fs.existsSync(tokenFile)) return [];
     try {
         const data = JSON.parse(fs.readFileSync(tokenFile, 'utf8')) as FcmTokenStore;
-        return Array.isArray(data.tokens)
-            ? [...new Set(data.tokens.filter(token => typeof token === 'string' && token.length > 0))]
+        return Array.isArray(data.devices)
+            ? data.devices.filter(device =>
+                device &&
+                typeof device.token === 'string' &&
+                device.token.length > 0 &&
+                typeof device.serverId === 'string' &&
+                device.serverId.length > 0
+            )
             : [];
     } catch (error) {
         console.error('[FCM] Token store could not be loaded:', error instanceof Error ? error.message : error);
@@ -29,10 +33,10 @@ function loadTokens(): string[] {
     }
 }
 
-function saveTokens() {
+function saveDevices() {
     fs.mkdirSync(dataDir, { recursive: true });
     const temporaryFile = tokenFile + '.tmp';
-    fs.writeFileSync(temporaryFile, JSON.stringify({ tokens }, null, 2), 'utf8');
+    fs.writeFileSync(temporaryFile, JSON.stringify({ devices }, null, 2), 'utf8');
     fs.renameSync(temporaryFile, tokenFile);
 }
 
@@ -67,51 +71,57 @@ function ensureInitialized(): boolean {
     }
 }
 
-export function registerFcmToken(token: string): number {
-    const normalized = token.trim();
-    if (!normalized || normalized.length > 4096) throw new Error('Invalid FCM token');
-    if (!tokens.includes(normalized)) {
-        tokens.push(normalized);
-        saveTokens();
+export function registerFcmToken(token: string, serverId: string): number {
+    const normalizedToken = token.trim();
+    const normalizedServerId = serverId.trim();
+    if (!normalizedToken || normalizedToken.length > 4096) throw new Error('Invalid FCM token');
+    if (!normalizedServerId) throw new Error('Invalid serverId');
+
+    const existing = devices.find(device => device.token === normalizedToken);
+    if (existing) {
+        existing.serverId = normalizedServerId;
+    } else {
+        devices.push({ token: normalizedToken, serverId: normalizedServerId });
     }
-    return tokens.length;
+    saveDevices();
+    return devices.length;
 }
 
 export function unregisterFcmToken(token: string): number {
     const normalized = token.trim();
-    const nextTokens = tokens.filter(item => item !== normalized);
-    if (nextTokens.length !== tokens.length) {
-        tokens = nextTokens;
-        saveTokens();
+    const nextDevices = devices.filter(device => device.token !== normalized);
+    if (nextDevices.length !== devices.length) {
+        devices = nextDevices;
+        saveDevices();
     }
-    return tokens.length;
+    return devices.length;
 }
 
 export function getFcmTokenCount(): number {
-    return tokens.length;
+    return devices.length;
 }
 
 export async function sendFcmNotification(alert: Alert, picoName: string): Promise<void> {
-    if (tokens.length === 0 || !ensureInitialized()) return;
+    if (devices.length === 0 || !ensureInitialized()) return;
 
     const messaging = getMessaging();
-    const results = await Promise.all(tokens.map(async token => {
+    const results = await Promise.all(devices.map(async device => {
         try {
             await messaging.send({
-                token,
+                token: device.token,
                 notification: {
-                    title: SERVER_NAME + ' · ' + picoName,
+                    title: picoName,
                     body: alert.message,
                 },
                 data: {
-                    serverId: SERVER_ID,
+                    serverId: device.serverId,
                     picoId: alert.picoId,
                 },
             });
-            return { token, success: true, code: undefined };
+            return { token: device.token, success: true, code: undefined };
         } catch (error) {
             return {
-                token,
+                token: device.token,
                 success: false,
                 code: error && typeof error === 'object' && 'code' in error
                     ? String(error.code)
@@ -127,8 +137,8 @@ export async function sendFcmNotification(alert: Alert, picoName: string): Promi
 
     if (invalidTokens.length > 0) {
         const invalidSet = new Set(invalidTokens);
-        tokens = tokens.filter(token => !invalidSet.has(token));
-        saveTokens();
+        devices = devices.filter(device => !invalidSet.has(device.token));
+        saveDevices();
         console.log('[FCM] Removed ' + invalidTokens.length + ' invalid device token(s)');
     }
 

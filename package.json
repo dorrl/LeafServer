@@ -1,17 +1,17 @@
 {
-  "name": "smartfarmserver",
+  "name": "LeafServer",
   "version": "1.0.0",
   "description": "",
   "keywords": [
     "cli"
   ],
-  "homepage": "https://github.com/dorrl/smartFarmServer#readme",
+  "homepage": "https://github.com/dorrl/LeafServer",
   "bugs": {
-    "url": "https://github.com/dorrl/smartFarmServer/issues"
+    "url": "https://github.com/dorrl/LeafServer/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dorrl/smartFarmServer.git"
+    "url": "git+https://github.com/dorrl/LeafServer.git"
   },
   "license": "ISC",
   "author": "dorrl",

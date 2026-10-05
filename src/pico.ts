@@ -6,7 +6,8 @@ import { sendFcmNotification } from './fcm.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, '../data');
-const dataFile = path.join(dataDir, 'smartfarm-state.json');
+const dataFile = path.join(dataDir, 'leaf-state.json');
+const legacyDataFile = path.join(dataDir, 'smartfarm-state.json');
 export const DEFAULT_SETTINGS: ServerSettings = { measurementIntervalMinutes: 1, syncIntervalMinutes: 5, retentionMonths: 6 };
 
 type PersistedData = { picos: PicoType[]; readings: Reading[]; alerts: Alert[]; settings?: ServerSettings; };
@@ -304,9 +305,10 @@ export function updateSettings(next: ServerSettings) {
 }
 
 export function loadPersistedData() {
-    if (!fs.existsSync(dataFile)) return;
+    const sourceFile = fs.existsSync(dataFile) ? dataFile : legacyDataFile;
+    if (!fs.existsSync(sourceFile)) return;
     try {
-        const data: PersistedData = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+        const data: PersistedData = JSON.parse(fs.readFileSync(sourceFile, 'utf8'));
         readings = Array.isArray(data.readings) ? data.readings : [];
         alerts = Array.isArray(data.alerts) ? data.alerts : [];
         if (data.settings && Number.isInteger(data.settings.retentionMonths)) {

@@ -12,6 +12,9 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`service discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms`)), DISCOVERY_TIMEOUT_MS))
     ]);
     console.log(`[BLE] Services discovered: ${picoId}, services=${services.length}`);
+    if (services.length === 0) {
+      throw new Error('service discovery returned 0 services');
+    }
 
     const characteristics: Characteristic[] = [];
     const discoverableServices = services.filter((service: any) => {
@@ -28,6 +31,9 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
     }
 
     console.log(`[BLE] Characteristics discovered: ${picoId}, services=${discoverableServices.length}, characteristics=${characteristics.length}`);
+    if (characteristics.length === 0) {
+      throw new Error('characteristic discovery returned 0 characteristics');
+    }
 
     let hasSubscription = false;
     for (const characteristic of characteristics) {

@@ -17,6 +17,7 @@ export async function startScanning(runtime: BleRuntime) {
   try {
     await noble.startScanningAsync([], true);
     runtime.setScanning(true);
+    console.log('[BLE] Scanning started');
   } catch (error) {
     console.error('[BLE] Failed to start scan:', error instanceof Error ? error.message : error);
   }

@@ -6,6 +6,7 @@ import {
   Peripheral,
   normalizePicoId,
   SCAN_RECOVERY_INTERVAL_MS,
+  SCAN_WATCHDOG_INTERVAL_MS,
   CONNECTION_SWEEP_INTERVAL_MS,
   BLE_RESCAN_INTERVAL_MS
 } from './types.js';
@@ -64,6 +65,11 @@ export function setupScanner(runtime: BleRuntime) {
     if (!runtime.isAdapterPoweredOn() || runtime.getScanning() || runtime.getQueueRunning()) return;
     void startScanning(runtime);
   }, SCAN_RECOVERY_INTERVAL_MS);
+
+  // Recover if Noble's scan silently stops while our local flag still says it is active.
+  setInterval(() => {
+    void restartScanning(runtime);
+  }, SCAN_WATCHDOG_INTERVAL_MS);
 
   setInterval(() => {
     void restartScanning(runtime);

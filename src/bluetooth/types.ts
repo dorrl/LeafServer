@@ -28,7 +28,8 @@ export type BleRuntime = {
   isAdapterPoweredOn: () => boolean;
 };
 
-export const PICO_NAME_KEYWORDS = ['leaf-pico'];
+// Support both current and legacy Pico firmware BLE names.
+export const PICO_NAME_KEYWORDS = ['leaf-pico', 'smartfarm-pico'];
 export const CONNECT_TIMEOUT_MS = 12_000;
 export const CONNECT_RETRY_COUNT = 2;
 export const CONNECT_RETRY_DELAY_MS = 1_000;

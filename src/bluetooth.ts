@@ -22,11 +22,9 @@ const runtime: BleRuntime = {
   isAdapterPoweredOn: () => adapterPoweredOn
 };
 
-console.log('[BLE] Initializing Bluetooth adapter');
 setupScanner(runtime);
 
 noble.on('stateChange', async state => {
-  console.log(`[BLE] Adapter state: ${state}`);
   adapterPoweredOn = state === 'poweredOn';
   if (adapterPoweredOn) {
     await startScanning(runtime);

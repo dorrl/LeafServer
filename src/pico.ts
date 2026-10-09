@@ -206,9 +206,11 @@ export class Pico {
     }
 
     setConnected(connected: boolean) {
+        const wasConnected = this.connected;
         this.connected = connected;
         this.updatedAt = new Date().toISOString();
-        if (!connected) {
+        // Only alert for a real connected -> disconnected transition.
+        if (wasConnected && !connected) {
             const alert: Alert = {
                 id: crypto.randomUUID(),
                 picoId: this.id,

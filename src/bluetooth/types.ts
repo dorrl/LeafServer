@@ -37,6 +37,7 @@ export const DISCOVERY_TIMEOUT_MS = 10_000;
 export const RECONNECT_DELAY_MS = 5 * 60 * 1000;
 export const CONNECTION_SWEEP_INTERVAL_MS = 5_000;
 export const SCAN_RECOVERY_INTERVAL_MS = 10_000;
+export const SCAN_WATCHDOG_INTERVAL_MS = 60_000;
 export const BLE_RESCAN_INTERVAL_MS = 10 * 60 * 1000;
 export const KNOWN_PICO_STALE_MS = 60_000;
 export const MAX_PENDING_TEXT = 4096;

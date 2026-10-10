@@ -33,7 +33,7 @@ export async function stopScanning(runtime: BleRuntime) {
   }
 }
 
-async function restartScanning(runtime: BleRuntime) {
+export async function restartScanning(runtime: BleRuntime) {
   if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
   await stopScanning(runtime);
   await startScanning(runtime);
@@ -56,7 +56,7 @@ export function setupScanner(runtime: BleRuntime) {
       localName: localName || existing?.localName,
       lastSeenAt: Date.now()
     });
-    enqueuePico(runtime, peripheral, picoId, localName);
+    enqueuePico(runtime, peripheral, picoId, localName || existing?.localName);
   });
 
   setInterval(() => sweepKnownPicos(runtime), CONNECTION_SWEEP_INTERVAL_MS);
@@ -66,7 +66,7 @@ export function setupScanner(runtime: BleRuntime) {
     void startScanning(runtime);
   }, SCAN_RECOVERY_INTERVAL_MS);
 
-  // Recover if Noble's scan silently stops while our local flag still says it is active.
+  // Restart the actual Noble scan periodically in case it stopped without updating our flag.
   setInterval(() => {
     void restartScanning(runtime);
   }, SCAN_WATCHDOG_INTERVAL_MS);

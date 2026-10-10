@@ -21,7 +21,8 @@ export function clearReconnectTimer(runtime: BleRuntime, picoId: string) {
 
 export function enqueuePico(runtime: BleRuntime, peripheral: Peripheral, picoId: string, localName?: string) {
   if (!runtime.isAdapterPoweredOn()) return;
-  if (runtime.connectedPeripherals.has(picoId) || runtime.connectingPeripherals.has(picoId) || runtime.queuedPicos.has(picoId)) return;
+  if (runtime.connectedPeripherals.has(picoId) || runtime.connectingPeripherals.has(picoId) ||
+      runtime.queuedPicos.has(picoId) || runtime.reconnectTimers.has(picoId)) return;
   runtime.queuedPicos.add(picoId);
   runtime.connectingPeripherals.add(picoId);
   runtime.connectionQueue.push({ peripheral, picoId, localName });
@@ -32,6 +33,8 @@ export function enqueuePico(runtime: BleRuntime, peripheral: Peripheral, picoId:
 export function sweepKnownPicos(runtime: BleRuntime) {
   if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
   for (const [picoId, device] of runtime.knownPicos) {
+    // Do not reconnect with a stale Peripheral object. Wait for a recent advertisement.
+    if (Date.now() - device.lastSeenAt > 60_000) continue;
     if (!runtime.connectedPeripherals.has(picoId) && !runtime.connectingPeripherals.has(picoId) && !runtime.queuedPicos.has(picoId)) {
       enqueuePico(runtime, device.peripheral, picoId, device.localName);
     }
@@ -42,7 +45,7 @@ export function scheduleReconnect(runtime: BleRuntime, picoId: string) {
   if (!runtime.isAdapterPoweredOn() || runtime.reconnectTimers.has(picoId)) return;
   runtime.reconnectTimers.set(picoId, setTimeout(() => {
     runtime.reconnectTimers.delete(picoId);
-    // Force Noble to restart scanning; the next connection must use a fresh advertisement.
+    // Restart scanning; a fresh advertisement should provide the Peripheral used for retry.
     void restartScanning(runtime);
   }, RECONNECT_DELAY_MS));
 }
@@ -92,12 +95,12 @@ export async function processConnectionQueue(runtime: BleRuntime) {
       } catch (error) {
         runtime.connectedPeripherals.delete(item.picoId);
         runtime.connectingPeripherals.delete(item.picoId);
+        runtime.queuedPicos.delete(item.picoId);
         clearPicoPolling(runtime, item.picoId);
         const pico = picoList[item.picoId];
         if (pico) pico.setConnected(false);
         console.error(`[BLE] Connection flow failed: ${item.picoId}:`, error instanceof Error ? error.message : error);
-        // The Peripheral object may now be stale. A fresh advertisement must replace it.
-        runtime.knownPicos.delete(item.picoId);
+        // Keep the known device identity, but only retry after cooldown and with a fresh advertisement.
         scheduleReconnect(runtime, item.picoId);
         try { await item.peripheral.disconnectAsync(); } catch (_) {}
       }
@@ -125,8 +128,8 @@ function registerDisconnectHandler(runtime: BleRuntime, peripheral: Peripheral, 
     runtime.connectingPeripherals.delete(picoId);
     runtime.queuedPicos.delete(picoId);
     clearPicoPolling(runtime, picoId);
-    // Force the next connection to use a newly discovered Peripheral.
-    runtime.knownPicos.delete(picoId);
+    // Keep the ID/name so advertisements without a local name can still be recognized.
+    // The scanner replaces this Peripheral with the latest one before retrying.
     console.log(`[BLE] Disconnected: ${picoId}`);
     scheduleReconnect(runtime, picoId);
   });

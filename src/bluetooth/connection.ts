@@ -5,7 +5,7 @@ import {
   DISCOVERY_TIMEOUT_MS, Peripheral, QueuedDevice, RECONNECT_DELAY_MS, BleRuntime
 } from './types.js';
 import { setupPeripheral } from './gatt.js';
-import { stopScanning, startScanning } from './scanner.js';
+import { stopScanning, startScanning, restartScanning } from './scanner.js';
 
 export function delay(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -42,9 +42,8 @@ export function scheduleReconnect(runtime: BleRuntime, picoId: string) {
   if (!runtime.isAdapterPoweredOn() || runtime.reconnectTimers.has(picoId)) return;
   runtime.reconnectTimers.set(picoId, setTimeout(() => {
     runtime.reconnectTimers.delete(picoId);
-    // Do not reuse the Peripheral object from the previous connection.
-    // Wait for a fresh advertisement so Noble gives us the current connection state.
-    void startScanning(runtime);
+    // Force Noble to restart scanning; the next connection must use a fresh advertisement.
+    void restartScanning(runtime);
   }, RECONNECT_DELAY_MS));
 }
 
@@ -97,8 +96,7 @@ export async function processConnectionQueue(runtime: BleRuntime) {
         const pico = picoList[item.picoId];
         if (pico) pico.setConnected(false);
         console.error(`[BLE] Connection flow failed: ${item.picoId}:`, error instanceof Error ? error.message : error);
-        // The Peripheral object may now be stale. A fresh advertisement must
-        // replace it before the next connection attempt.
+        // The Peripheral object may now be stale. A fresh advertisement must replace it.
         runtime.knownPicos.delete(item.picoId);
         scheduleReconnect(runtime, item.picoId);
         try { await item.peripheral.disconnectAsync(); } catch (_) {}

@@ -35,7 +35,17 @@ export async function stopScanning(runtime: BleRuntime) {
 
 export async function restartScanning(runtime: BleRuntime) {
   if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
-  await stopScanning(runtime);
+
+  // Do not trust only our scanning flag: Noble may still be scanning while the flag is stale.
+  try {
+    await noble.stopScanningAsync();
+  } catch (_) {
+    // It is okay if Noble reports that scanning was already stopped.
+  }
+  runtime.setScanning(false);
+
+  // A discover event may have started a connection while stopScanningAsync was pending.
+  if (runtime.getQueueRunning()) return;
   await startScanning(runtime);
 }
 
@@ -51,6 +61,7 @@ export function setupScanner(runtime: BleRuntime) {
     if (!isPico) return;
 
     const existing = runtime.knownPicos.get(picoId);
+    // Refresh the Peripheral object and last-seen time on every advertisement.
     runtime.knownPicos.set(picoId, {
       peripheral,
       localName: localName || existing?.localName,
@@ -66,7 +77,7 @@ export function setupScanner(runtime: BleRuntime) {
     void startScanning(runtime);
   }, SCAN_RECOVERY_INTERVAL_MS);
 
-  // Restart the actual Noble scan periodically in case it stopped without updating our flag.
+  // Restart the actual Noble scan periodically, even if the local flag is stale.
   setInterval(() => {
     void restartScanning(runtime);
   }, SCAN_WATCHDOG_INTERVAL_MS);

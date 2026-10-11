@@ -10,7 +10,7 @@ import {
   CONNECTION_SWEEP_INTERVAL_MS,
   BLE_RESCAN_INTERVAL_MS
 } from './types.js';
-import { enqueuePico, sweepKnownPicos } from './connection.js';
+import { clearReconnectTimer, enqueuePico, sweepKnownPicos } from './connection.js';
 
 export async function startScanning(runtime: BleRuntime) {
   if (!runtime.isAdapterPoweredOn() || runtime.getScanning() || runtime.getQueueRunning()) return;
@@ -67,6 +67,10 @@ export function setupScanner(runtime: BleRuntime) {
       localName: localName || existing?.localName,
       lastSeenAt: Date.now()
     });
+
+    // A fresh advertisement is a better retry signal than waiting out the cooldown.
+    // Clear the pending timer so this new Peripheral can be queued immediately.
+    clearReconnectTimer(runtime, picoId);
     enqueuePico(runtime, peripheral, picoId, localName || existing?.localName);
   });
 

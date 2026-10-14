@@ -44,11 +44,15 @@ export async function startScanning(runtime: BleRuntime) {
 
 export async function stopScanning(runtime: BleRuntime) {
   await withScanLock(async () => {
-    if (!runtime.getScanning()) return;
+    // Stop Noble even if our local flag is false; that flag may be stale.
     try {
       await noble.stopScanningAsync();
     } catch (error) {
-      console.error('[BLE] Failed to stop scan:', error instanceof Error ? error.message : error);
+      // Noble can reject when it was already stopped. Keep recovery moving.
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/not scanning|already stopped|does not exist/i.test(message)) {
+        console.error('[BLE] Failed to stop scan:', message);
+      }
     } finally {
       runtime.setScanning(false);
     }
@@ -61,7 +65,6 @@ export async function restartScanning(runtime: BleRuntime) {
   await withScanLock(async () => {
     if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
     try {
-      // Stop Noble even when our flag says scanning is off: the flag can be stale.
       await noble.stopScanningAsync();
     } catch (_) {
       // Noble may report that scanning was already stopped.

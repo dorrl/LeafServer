@@ -12,17 +12,13 @@ import {
 } from './types.js';
 import { clearReconnectTimer, enqueuePico, sweepKnownPicos } from './connection.js';
 
-// Noble scan operations must not overlap. Timers, adapter events, and connection
-// completion can otherwise race and leave our local scan state out of sync.
+// Serialize every Noble scan operation. Requests are queued rather than dropped,
+// so a stop requested during start (or vice versa) is not silently lost.
 let scanOperation: Promise<void> | undefined;
 
 async function withScanLock(operation: () => Promise<void>) {
-  if (scanOperation) {
-    await scanOperation;
-    return;
-  }
-
-  const current = operation();
+  const previous = scanOperation ?? Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
   scanOperation = current;
   try {
     await current;
@@ -35,7 +31,6 @@ export async function startScanning(runtime: BleRuntime) {
   if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
 
   await withScanLock(async () => {
-    // Re-check after waiting for another scan operation to finish.
     if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning() || runtime.getScanning()) return;
     try {
       await noble.startScanningAsync([], true);
@@ -64,9 +59,7 @@ export async function restartScanning(runtime: BleRuntime) {
   if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
 
   await withScanLock(async () => {
-    // The connection queue may have started while this restart waited for the lock.
     if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
-
     try {
       // Stop Noble even when our flag says scanning is off: the flag can be stale.
       await noble.stopScanningAsync();
@@ -76,7 +69,6 @@ export async function restartScanning(runtime: BleRuntime) {
       runtime.setScanning(false);
     }
 
-    // Re-check before restarting, because queue state can change during the await.
     if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
     try {
       await noble.startScanningAsync([], true);

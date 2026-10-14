@@ -12,41 +12,80 @@ import {
 } from './types.js';
 import { clearReconnectTimer, enqueuePico, sweepKnownPicos } from './connection.js';
 
-export async function startScanning(runtime: BleRuntime) {
-  if (!runtime.isAdapterPoweredOn() || runtime.getScanning() || runtime.getQueueRunning()) return;
+// Noble scan operations must not overlap. Timers, adapter events, and connection
+// completion can otherwise race and leave our local scan state out of sync.
+let scanOperation: Promise<void> | undefined;
+
+async function withScanLock(operation: () => Promise<void>) {
+  if (scanOperation) {
+    await scanOperation;
+    return;
+  }
+
+  const current = operation();
+  scanOperation = current;
   try {
-    await noble.startScanningAsync([], true);
-    runtime.setScanning(true);
-  } catch (error) {
-    console.error('[BLE] Failed to start scan:', error instanceof Error ? error.message : error);
+    await current;
+  } finally {
+    if (scanOperation === current) scanOperation = undefined;
   }
 }
 
+export async function startScanning(runtime: BleRuntime) {
+  if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
+
+  await withScanLock(async () => {
+    // Re-check after waiting for another scan operation to finish.
+    if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning() || runtime.getScanning()) return;
+    try {
+      await noble.startScanningAsync([], true);
+      runtime.setScanning(true);
+    } catch (error) {
+      runtime.setScanning(false);
+      console.error('[BLE] Failed to start scan:', error instanceof Error ? error.message : error);
+    }
+  });
+}
+
 export async function stopScanning(runtime: BleRuntime) {
-  if (!runtime.getScanning()) return;
-  try {
-    await noble.stopScanningAsync();
-  } catch (error) {
-    console.error('[BLE] Failed to stop scan:', error instanceof Error ? error.message : error);
-  } finally {
-    runtime.setScanning(false);
-  }
+  await withScanLock(async () => {
+    if (!runtime.getScanning()) return;
+    try {
+      await noble.stopScanningAsync();
+    } catch (error) {
+      console.error('[BLE] Failed to stop scan:', error instanceof Error ? error.message : error);
+    } finally {
+      runtime.setScanning(false);
+    }
+  });
 }
 
 export async function restartScanning(runtime: BleRuntime) {
   if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
 
-  // Do not trust only our scanning flag: Noble may still be scanning while the flag is stale.
-  try {
-    await noble.stopScanningAsync();
-  } catch (_) {
-    // It is okay if Noble reports that scanning was already stopped.
-  }
-  runtime.setScanning(false);
+  await withScanLock(async () => {
+    // The connection queue may have started while this restart waited for the lock.
+    if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
 
-  // A discover event may have started a connection while stopScanningAsync was pending.
-  if (runtime.getQueueRunning()) return;
-  await startScanning(runtime);
+    try {
+      // Stop Noble even when our flag says scanning is off: the flag can be stale.
+      await noble.stopScanningAsync();
+    } catch (_) {
+      // Noble may report that scanning was already stopped.
+    } finally {
+      runtime.setScanning(false);
+    }
+
+    // Re-check before restarting, because queue state can change during the await.
+    if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
+    try {
+      await noble.startScanningAsync([], true);
+      runtime.setScanning(true);
+    } catch (error) {
+      runtime.setScanning(false);
+      console.error('[BLE] Failed to restart scan:', error instanceof Error ? error.message : error);
+    }
+  });
 }
 
 export function setupScanner(runtime: BleRuntime) {
@@ -61,15 +100,14 @@ export function setupScanner(runtime: BleRuntime) {
     if (!isPico) return;
 
     const existing = runtime.knownPicos.get(picoId);
-    // Refresh the Peripheral object and last-seen time on every advertisement.
     runtime.knownPicos.set(picoId, {
       peripheral,
       localName: localName || existing?.localName,
       lastSeenAt: Date.now()
     });
 
-    // A fresh advertisement is a better retry signal than waiting out the cooldown.
-    // Clear the pending timer so this new Peripheral can be queued immediately.
+    // A fresh advertisement supersedes a pending cooldown and provides a fresh
+    // Peripheral object for the next connection attempt.
     clearReconnectTimer(runtime, picoId);
     enqueuePico(runtime, peripheral, picoId, localName || existing?.localName);
   });
@@ -81,19 +119,13 @@ export function setupScanner(runtime: BleRuntime) {
     void startScanning(runtime);
   }, SCAN_RECOVERY_INTERVAL_MS);
 
-  // Restart the actual Noble scan periodically, even if the local flag is stale.
-  setInterval(() => {
-    void restartScanning(runtime);
-  }, SCAN_WATCHDOG_INTERVAL_MS);
-
-  setInterval(() => {
-    void restartScanning(runtime);
-  }, BLE_RESCAN_INTERVAL_MS);
+  setInterval(() => { void restartScanning(runtime); }, SCAN_WATCHDOG_INTERVAL_MS);
+  setInterval(() => { void restartScanning(runtime); }, BLE_RESCAN_INTERVAL_MS);
 }
 
 export async function recoverScanning(runtime: BleRuntime) {
-  if (!runtime.isAdapterPoweredOn() || runtime.getScanning() || runtime.getQueueRunning()) return;
-  await startScanning(runtime);
+  if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
+  if (!runtime.getScanning()) await startScanning(runtime);
 }
 
 export function removeStalePicos(runtime: BleRuntime) {

@@ -70,8 +70,9 @@ export function scheduleReconnect(runtime: BleRuntime, picoId: string) {
     if (!runtime.isAdapterPoweredOn()) return;
 
     console.log(`[BLE] Starting fresh scan for ${picoId} (retry ${attempt}, delay ${delayMs}ms)`);
-    // Do not reconnect from the cached Peripheral. Restart scanning and let a
-    // new advertisement enqueue a newly discovered Peripheral object.
+    // Drop even advertisements received during cooldown so this cycle can only
+    // enqueue a Peripheral discovered by the fresh scan.
+    invalidatePeripheral(runtime, picoId);
     void restartScanning(runtime);
   }, delayMs));
 }

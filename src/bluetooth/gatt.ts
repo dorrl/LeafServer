@@ -1,16 +1,38 @@
 import { BleRuntime, Characteristic, DISCOVERY_TIMEOUT_MS, Peripheral } from './types.js';
 import { applyPicoState, attachNotificationHandler } from './parser.js';
 
+async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function assertPeripheralConnected(peripheral: Peripheral, picoId: string) {
+  if (peripheral.state === 'disconnected') {
+    throw new Error(`peripheral disconnected during GATT setup: ${picoId}`);
+  }
+}
+
 export async function setupPeripheral(runtime: BleRuntime, peripheral: Peripheral, picoId: string, localName?: string) {
   const pico = (await import('../pico.js')).picoList[picoId];
   if (!pico) throw new Error(`Pico not found: ${picoId}`);
 
   try {
     console.log(`[BLE] Discovering services: ${picoId}`);
-    const services = await Promise.race([
+    const services = await withTimeout(
       peripheral.discoverServicesAsync([]),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`service discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms`)), DISCOVERY_TIMEOUT_MS))
-    ]);
+      DISCOVERY_TIMEOUT_MS,
+      `service discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms`
+    );
+    assertPeripheralConnected(peripheral, picoId);
     console.log(`[BLE] Services discovered: ${picoId}, services=${services.length}`);
     if (services.length === 0) {
       throw new Error('service discovery returned 0 services');
@@ -23,11 +45,16 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
     });
 
     for (const service of discoverableServices) {
-      const serviceCharacteristics = await Promise.race([
+      const serviceUuid = String(service.uuid || 'unknown');
+      console.log(`[BLE] Discovering characteristics: ${picoId}, service=${serviceUuid}`);
+      const serviceCharacteristics = await withTimeout(
         service.discoverCharacteristicsAsync([]),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`characteristic discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms`)), DISCOVERY_TIMEOUT_MS))
-      ]);
+        DISCOVERY_TIMEOUT_MS,
+        `characteristic discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms (service=${serviceUuid})`
+      );
+      assertPeripheralConnected(peripheral, picoId);
       characteristics.push(...serviceCharacteristics);
+      console.log(`[BLE] Characteristics discovered for service: ${picoId}, service=${serviceUuid}, count=${serviceCharacteristics.length}`);
     }
 
     console.log(`[BLE] Characteristics discovered: ${picoId}, services=${discoverableServices.length}, characteristics=${characteristics.length}`);
@@ -37,11 +64,17 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
 
     let hasSubscription = false;
     for (const characteristic of characteristics) {
+      assertPeripheralConnected(peripheral, picoId);
       const properties: string[] = characteristic.properties || [];
       if (!properties.includes('notify') && !properties.includes('indicate')) continue;
       console.log(`[BLE] Subscribing: Pico=${picoId} characteristic=${characteristic.uuid}`);
       attachNotificationHandler(pico, characteristic);
-      await characteristic.subscribeAsync();
+      await withTimeout(
+        characteristic.subscribeAsync(),
+        DISCOVERY_TIMEOUT_MS,
+        `notification subscription timeout after ${DISCOVERY_TIMEOUT_MS}ms (characteristic=${characteristic.uuid})`
+      );
+      assertPeripheralConnected(peripheral, picoId);
       hasSubscription = true;
       console.log(`[BLE] Subscribed: Pico=${picoId} characteristic=${characteristic.uuid}`);
     }
@@ -55,7 +88,7 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       const lastValues = new Map<string, string>();
       let pollInProgress = false;
       const interval = setInterval(async () => {
-        if (!runtime.connectedPeripherals.has(picoId)) {
+        if (!runtime.connectedPeripherals.has(picoId) || peripheral.state === 'disconnected') {
           clearInterval(interval);
           runtime.pollingTimers.delete(picoId);
           return;

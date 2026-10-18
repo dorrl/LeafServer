@@ -15,13 +15,13 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message:
   }
 }
 
-function assertPeripheralConnected(peripheral: Peripheral, picoId: string) {
+function assertPeripheralConnected(peripheral: Peripheral, picoId: string): void {
   if (peripheral.state === 'disconnected') {
     throw new Error(`peripheral disconnected during GATT setup: ${picoId}`);
   }
 }
 
-export async function setupPeripheral(runtime: BleRuntime, peripheral: Peripheral, picoId: string, localName?: string) {
+export async function setupPeripheral(runtime: BleRuntime, peripheral: Peripheral, picoId: string, _localName?: string): Promise<void> {
   const pico = (await import('../pico.js')).picoList[picoId];
   if (!pico) throw new Error(`Pico not found: ${picoId}`);
 
@@ -38,14 +38,14 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       throw new Error('service discovery returned 0 services');
     }
 
-    const characteristics: Characteristic[] = [];
-    const discoverableServices = services.filter((service: any) => {
-      const uuid = String(service.uuid || '').toLowerCase().replace(/-/g, '');
+    const discoverableServices = services.filter(service => {
+      const uuid = service.uuid.toLowerCase().replace(/-/g, '');
       return uuid !== '1800' && uuid !== '1801';
     });
+    const characteristics: Characteristic[] = [];
 
     for (const service of discoverableServices) {
-      const serviceUuid = String(service.uuid || 'unknown');
+      const serviceUuid = service.uuid || 'unknown';
       console.log(`[BLE] Discovering characteristics: ${picoId}, service=${serviceUuid}`);
       const serviceCharacteristics = await withTimeout(
         service.discoverCharacteristicsAsync([]),
@@ -65,7 +65,7 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
     let hasSubscription = false;
     for (const characteristic of characteristics) {
       assertPeripheralConnected(peripheral, picoId);
-      const properties: string[] = characteristic.properties || [];
+      const properties = characteristic.properties;
       if (!properties.includes('notify') && !properties.includes('indicate')) continue;
       console.log(`[BLE] Subscribing: Pico=${picoId} characteristic=${characteristic.uuid}`);
       attachNotificationHandler(pico, characteristic);
@@ -79,8 +79,8 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       console.log(`[BLE] Subscribed: Pico=${picoId} characteristic=${characteristic.uuid}`);
     }
 
-    const readableChars = characteristics.filter((characteristic: Characteristic) => {
-      const properties: string[] = characteristic.properties || [];
+    const readableChars = characteristics.filter(characteristic => {
+      const properties = characteristic.properties;
       return properties.includes('read') && !properties.includes('notify') && !properties.includes('indicate');
     });
 

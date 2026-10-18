@@ -1,4 +1,5 @@
 import noble from '@abandonware/noble';
+import { picoList } from '../pico.js';
 import {
   BleRuntime,
   PICO_NAME_KEYWORDS,
@@ -10,7 +11,7 @@ import {
   CONNECTION_SWEEP_INTERVAL_MS,
   BLE_RESCAN_INTERVAL_MS
 } from './types.js';
-import { clearReconnectTimer, enqueuePico, sweepKnownPicos } from './connection.js';
+import { enqueuePico, sweepKnownPicos } from './connection.js';
 
 // Serialize every Noble scan operation. Requests are queued rather than dropped,
 // so a stop requested during start (or vice versa) is not silently lost.
@@ -85,7 +86,7 @@ export async function restartScanning(runtime: BleRuntime) {
 
 export function setupScanner(runtime: BleRuntime) {
   noble.on('discover', (peripheral: Peripheral) => {
-    const localName = peripheral.advertisement.localName;
+    const advertisedName = peripheral.advertisement.localName || undefined;
     const rawId = peripheral.address || peripheral.id;
     if (!rawId) return;
 

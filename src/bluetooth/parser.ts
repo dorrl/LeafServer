@@ -1,28 +1,44 @@
-import { Pico, picoList } from '../pico.js';
-import { PicoState } from '../types.js';
-import { Characteristic, MAX_PENDING_TEXT } from './types.js';
+import { Pico } from '../pico.js';
+import type { PicoState } from '../types.js';
+import type { Characteristic } from './types.js';
+import { MAX_PENDING_TEXT } from './types.js';
 
 export function parsePicoState(data: Buffer, currentState: PicoState): PicoState | null {
   const text = data.toString('utf-8').trim();
   if (!text) return null;
 
   try {
-    const parsed = JSON.parse(text);
-    const result = { ...currentState };
-    let changed = false;
-    if (typeof parsed.temperature === 'number') { result.temperature = parsed.temperature; changed = true; }
-    if (typeof parsed.moisture === 'number') { result.moisture = parsed.moisture; changed = true; }
-    if (typeof parsed.light === 'number') { result.light = parsed.light; changed = true; }
-    if (changed) return result;
-  } catch (_) {}
+    const parsed: unknown = JSON.parse(text);
+    if (isRecord(parsed)) {
+      const result = { ...currentState };
+      let changed = false;
+      if (typeof parsed.temperature === 'number' && Number.isFinite(parsed.temperature)) {
+        result.temperature = parsed.temperature;
+        changed = true;
+      }
+      if (typeof parsed.moisture === 'number' && Number.isFinite(parsed.moisture)) {
+        result.moisture = parsed.moisture;
+        changed = true;
+      }
+      if (typeof parsed.light === 'number' && Number.isFinite(parsed.light)) {
+        result.light = parsed.light;
+        changed = true;
+      }
+      if (changed) return result;
+    }
+  } catch {
+    // Non-JSON payloads may use the legacy text or binary formats below.
+  }
 
   const result = { ...currentState };
   let found = false;
   const kvRegex = /(temp(?:erature)?|moist(?:ure)?|light|t|m|l)\s*[:=]\s*(-?\d+(?:\.\d+)?)/gi;
   let match: RegExpExecArray | null;
   while ((match = kvRegex.exec(text)) !== null) {
-    const key = match[1].toLowerCase();
-    const value = Number(match[2]);
+    const key = match[1]?.toLowerCase();
+    const rawValue = match[2];
+    if (!key || rawValue === undefined) continue;
+    const value = Number(rawValue);
     if (!Number.isFinite(value)) continue;
     if (key.startsWith('t')) result.temperature = value;
     else if (key.startsWith('m')) result.moisture = value;
@@ -48,7 +64,11 @@ export function parsePicoState(data: Buffer, currentState: PicoState): PicoState
   return null;
 }
 
-export function applyPicoState(pico: Pico, data: Buffer, characteristicUuid: string, source: 'notification' | 'polling') {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function applyPicoState(pico: Pico, data: Buffer, characteristicUuid: string, source: 'notification' | 'polling'): void {
   const state = parsePicoState(data, pico.state);
   if (!state) return;
   try {
@@ -58,7 +78,7 @@ export function applyPicoState(pico: Pico, data: Buffer, characteristicUuid: str
   }
 }
 
-export function attachNotificationHandler(pico: Pico, characteristic: Characteristic) {
+export function attachNotificationHandler(pico: Pico, characteristic: Characteristic): void {
   let pendingText = '';
 
   characteristic.on('data', (data: Buffer) => {

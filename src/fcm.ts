@@ -8,35 +8,43 @@ import type { Alert } from './types.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, '../data');
 const tokenFile = path.join(dataDir, 'fcm-tokens.json');
+
 type FcmDevice = { token: string; serverId: string };
 type FcmTokenStore = { devices: FcmDevice[] };
+
 let devices = loadDevices();
 let initialized = false;
 let initializationFailed = false;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isFcmDevice(value: unknown): value is FcmDevice {
+    if (!isRecord(value)) return false;
+    return typeof value.token === 'string'
+        && value.token.length > 0
+        && typeof value.serverId === 'string'
+        && value.serverId.length > 0;
+}
+
 function loadDevices(): FcmDevice[] {
     if (!fs.existsSync(tokenFile)) return [];
     try {
-        const data = JSON.parse(fs.readFileSync(tokenFile, 'utf8')) as FcmTokenStore;
-        return Array.isArray(data.devices)
-            ? data.devices.filter(device =>
-                device &&
-                typeof device.token === 'string' &&
-                device.token.length > 0 &&
-                typeof device.serverId === 'string' &&
-                device.serverId.length > 0
-            )
-            : [];
+        const parsed: unknown = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));
+        if (!isRecord(parsed) || !Array.isArray(parsed.devices)) return [];
+        return parsed.devices.filter(isFcmDevice);
     } catch (error) {
         console.error('[FCM] Token store could not be loaded:', error instanceof Error ? error.message : error);
         return [];
     }
 }
 
-function saveDevices() {
+function saveDevices(): void {
+    const store: FcmTokenStore = { devices };
     fs.mkdirSync(dataDir, { recursive: true });
     const temporaryFile = tokenFile + '.tmp';
-    fs.writeFileSync(temporaryFile, JSON.stringify({ devices }, null, 2), 'utf8');
+    fs.writeFileSync(temporaryFile, JSON.stringify(store, null, 2), 'utf8');
     fs.renameSync(temporaryFile, tokenFile);
 }
 
@@ -118,11 +126,11 @@ export async function sendFcmNotification(alert: Alert, picoName: string): Promi
                     picoId: alert.picoId,
                 },
             });
-            return { token: device.token, success: true, code: undefined };
+            return { token: device.token, success: true as const, code: undefined };
         } catch (error) {
             return {
                 token: device.token,
-                success: false,
+                success: false as const,
                 code: error && typeof error === 'object' && 'code' in error
                     ? String(error.code)
                     : undefined,

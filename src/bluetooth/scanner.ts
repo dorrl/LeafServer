@@ -127,6 +127,9 @@ export async function recoverScanning(runtime: BleRuntime) {
 export function removeStalePicos(runtime: BleRuntime) {
   const now = Date.now();
   for (const [picoId, device] of runtime.knownPicos) {
-    if (now - device.lastSeenAt > KNOWN_PICO_STALE_MS) runtime.knownPicos.delete(picoId);
+    if (device.peripheral && now - device.lastSeenAt > KNOWN_PICO_STALE_MS) {
+      // Retain identity/name metadata but never keep an old Peripheral usable.
+      runtime.knownPicos.set(picoId, { localName: device.localName, lastSeenAt: 0 });
+    }
   }
 }

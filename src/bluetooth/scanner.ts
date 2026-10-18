@@ -91,21 +91,21 @@ export function setupScanner(runtime: BleRuntime) {
     if (!rawId) return;
 
     const picoId = normalizePicoId(rawId);
-    const isKnownPico = runtime.knownPicos.has(picoId);
-    const isPico = isKnownPico || PICO_NAME_KEYWORDS.some(keyword => localName?.toLowerCase().includes(keyword));
+    const existing = runtime.knownPicos.get(picoId);
+    const isKnownPico = runtime.knownPicos.has(picoId) || Boolean(picoList[picoId]);
+    const isPico = isKnownPico || PICO_NAME_KEYWORDS.some(keyword => advertisedName?.toLowerCase().includes(keyword));
     if (!isPico) return;
 
-    const existing = runtime.knownPicos.get(picoId);
+    const localName = advertisedName || existing?.localName || picoList[picoId]?.name;
     runtime.knownPicos.set(picoId, {
       peripheral,
-      localName: localName || existing?.localName,
+      localName,
       lastSeenAt: Date.now()
     });
 
-    // A fresh advertisement supersedes a pending cooldown and provides a fresh
-    // Peripheral object for the next connection attempt.
-    clearReconnectTimer(runtime, picoId);
-    enqueuePico(runtime, peripheral, picoId, localName || existing?.localName);
+    // Advertisements refresh the cache during cooldown but must not bypass it.
+    // enqueuePico ignores this device while its reconnect timer is active.
+    enqueuePico(runtime, peripheral, picoId, localName);
   });
 
   setInterval(() => sweepKnownPicos(runtime), CONNECTION_SWEEP_INTERVAL_MS);

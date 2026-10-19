@@ -1,8 +1,7 @@
-import noble from '@abandonware/noble';
 import { Pico, picoList } from '../pico.js';
 import {
   CONNECT_RETRY_COUNT, CONNECT_RETRY_DELAY_MS, CONNECT_TIMEOUT_MS,
-  Peripheral, QueuedDevice, RECONNECT_DELAY_MS, BleRuntime
+  MAX_RECONNECT_DELAY_MS, Peripheral, QueuedDevice, RECONNECT_DELAY_MS, BleRuntime
 } from './types.js';
 import { setupPeripheral } from './gatt.js';
 import { stopScanning, startScanning, restartScanning } from './scanner.js';
@@ -17,6 +16,23 @@ export function clearPicoPolling(runtime: BleRuntime, picoId: string) {
 export function clearReconnectTimer(runtime: BleRuntime, picoId: string) {
   const timer = runtime.reconnectTimers.get(picoId);
   if (timer) { clearTimeout(timer); runtime.reconnectTimers.delete(picoId); }
+}
+
+function invalidatePeripheral(runtime: BleRuntime, picoId: string, localName?: string) {
+  const known = runtime.knownPicos.get(picoId);
+  // Keep identity/name so name-less advertisements can still be recognized, but
+  // discard the old Peripheral and force the next attempt to use a fresh scan result.
+  runtime.knownPicos.set(picoId, {
+    localName: localName || known?.localName,
+    lastSeenAt: 0
+  });
+}
+
+function removeQueuedPico(runtime: BleRuntime, picoId: string) {
+  for (let index = runtime.connectionQueue.length - 1; index >= 0; index--) {
+    if (runtime.connectionQueue[index]?.picoId === picoId) runtime.connectionQueue.splice(index, 1);
+  }
+  runtime.queuedPicos.delete(picoId);
 }
 
 export function enqueuePico(runtime: BleRuntime, peripheral: Peripheral, picoId: string, localName?: string) {
@@ -34,8 +50,8 @@ export function enqueuePico(runtime: BleRuntime, peripheral: Peripheral, picoId:
 export function sweepKnownPicos(runtime: BleRuntime) {
   if (!runtime.isAdapterPoweredOn() || runtime.getQueueRunning()) return;
   for (const [picoId, device] of runtime.knownPicos) {
-    // Never reconnect using an old Peripheral object; wait for a recent advertisement.
-    if (Date.now() - device.lastSeenAt > 60_000) continue;
+    // Never reconnect using an old or invalidated Peripheral object.
+    if (!device.peripheral || Date.now() - device.lastSeenAt > 60_000) continue;
     if (!runtime.connectedPeripherals.has(picoId) && !runtime.connectingPeripherals.has(picoId) && !runtime.queuedPicos.has(picoId)) {
       enqueuePico(runtime, device.peripheral, picoId, device.localName);
     }
@@ -44,11 +60,21 @@ export function sweepKnownPicos(runtime: BleRuntime) {
 
 export function scheduleReconnect(runtime: BleRuntime, picoId: string) {
   if (!runtime.isAdapterPoweredOn() || runtime.reconnectTimers.has(picoId)) return;
+
+  const attempt = (runtime.reconnectAttempts.get(picoId) ?? 0) + 1;
+  runtime.reconnectAttempts.set(picoId, attempt);
+  const delayMs = Math.min(RECONNECT_DELAY_MS * 2 ** (attempt - 1), MAX_RECONNECT_DELAY_MS);
+
   runtime.reconnectTimers.set(picoId, setTimeout(() => {
     runtime.reconnectTimers.delete(picoId);
-    // Scanning is needed to obtain a fresh Peripheral object for a retry.
+    if (!runtime.isAdapterPoweredOn()) return;
+
+    console.log(`[BLE] Starting fresh scan for ${picoId} (retry ${attempt}, delay ${delayMs}ms)`);
+    // Drop even advertisements received during cooldown so this cycle can only
+    // enqueue a Peripheral discovered by the fresh scan.
+    invalidatePeripheral(runtime, picoId);
     void restartScanning(runtime);
-  }, RECONNECT_DELAY_MS));
+  }, delayMs));
 }
 
 async function connectWithRetry(peripheral: Peripheral, picoId: string) {
@@ -95,6 +121,12 @@ export async function processConnectionQueue(runtime: BleRuntime) {
         runtime.connectedPeripherals.set(item.picoId, item.peripheral);
         runtime.connectingPeripherals.delete(item.picoId);
         clearReconnectTimer(runtime, item.picoId);
+        runtime.reconnectAttempts.delete(item.picoId);
+        runtime.knownPicos.set(item.picoId, {
+          peripheral: item.peripheral,
+          localName: item.localName || runtime.knownPicos.get(item.picoId)?.localName,
+          lastSeenAt: Date.now()
+        });
 
         const pico = getOrCreatePico(item.picoId, item.localName);
         pico.setConnected(true);
@@ -104,10 +136,11 @@ export async function processConnectionQueue(runtime: BleRuntime) {
       } catch (error) {
         runtime.connectedPeripherals.delete(item.picoId);
         runtime.connectingPeripherals.delete(item.picoId);
-        runtime.queuedPicos.delete(item.picoId);
+        removeQueuedPico(runtime, item.picoId);
         clearPicoPolling(runtime, item.picoId);
         const pico = picoList[item.picoId];
         if (pico) pico.setConnected(false);
+        invalidatePeripheral(runtime, item.picoId, item.localName);
         console.error(`[BLE] Connection flow failed: ${item.picoId}:`, error instanceof Error ? error.message : error);
 
         // Clear state before disconnecting: the disconnect event may fire immediately.
@@ -139,14 +172,17 @@ function getOrCreatePico(picoId: string, localName?: string) {
 
 function registerDisconnectHandler(runtime: BleRuntime, peripheral: Peripheral, picoId: string) {
   peripheral.once('disconnect', () => {
+    // A delayed event from an old Peripheral must not tear down a newer connection.
+    if (runtime.connectedPeripherals.get(picoId) !== peripheral) return;
+
     const pico = picoList[picoId];
     if (pico) pico.setConnected(false);
     runtime.connectedPeripherals.delete(picoId);
     runtime.connectingPeripherals.delete(picoId);
-    runtime.queuedPicos.delete(picoId);
+    removeQueuedPico(runtime, picoId);
     clearPicoPolling(runtime, picoId);
-    // Keep identity for advertisements without a local name; scanner refreshes Peripheral.
-    console.log(`[BLE] Disconnected: ${picoId}`);
+    invalidatePeripheral(runtime, picoId);
+    console.log(`[BLE] Disconnected: ${picoId}; cached connection discarded`);
     scheduleReconnect(runtime, picoId);
   });
 }

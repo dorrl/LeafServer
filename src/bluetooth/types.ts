@@ -34,7 +34,8 @@ export type QueuedDevice = {
 };
 
 export type KnownPico = {
-  peripheral: Peripheral;
+  // Undefined until a fresh advertisement supplies a usable Peripheral object.
+  peripheral?: Peripheral;
   localName?: string;
   lastSeenAt: number;
 };
@@ -45,6 +46,7 @@ export type BleRuntime = {
   queuedPicos: Set<string>;
   pollingTimers: Map<string, ReturnType<typeof setInterval>>;
   reconnectTimers: Map<string, ReturnType<typeof setTimeout>>;
+  reconnectAttempts: Map<string, number>;
   knownPicos: Map<string, KnownPico>;
   connectionQueue: QueuedDevice[];
   getScanning: () => boolean;
@@ -60,8 +62,9 @@ export const CONNECT_TIMEOUT_MS = 12_000;
 export const CONNECT_RETRY_COUNT = 2;
 export const CONNECT_RETRY_DELAY_MS = 1_000;
 export const DISCOVERY_TIMEOUT_MS = 10_000;
-// Recover quickly after a failed GATT setup; scanning will still prefer fresh advertisements.
-export const RECONNECT_DELAY_MS = 15_000;
+// Start with a short cooldown, then back off while a Pico remains unavailable.
+export const RECONNECT_DELAY_MS = 5_000;
+export const MAX_RECONNECT_DELAY_MS = 30_000;
 export const CONNECTION_SWEEP_INTERVAL_MS = 5_000;
 export const SCAN_RECOVERY_INTERVAL_MS = 10_000;
 export const SCAN_WATCHDOG_INTERVAL_MS = 60_000;

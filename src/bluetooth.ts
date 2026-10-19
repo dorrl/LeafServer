@@ -13,6 +13,7 @@ const runtime: BleRuntime = {
   queuedPicos: new Set(),
   pollingTimers: new Map(),
   reconnectTimers: new Map(),
+  reconnectAttempts: new Map(),
   knownPicos: new Map(),
   connectionQueue: [],
   getScanning: () => scanning,
@@ -36,6 +37,7 @@ noble.on('stateChange', async state => {
   runtime.pollingTimers.clear();
   for (const timer of runtime.reconnectTimers.values()) clearTimeout(timer);
   runtime.reconnectTimers.clear();
+  runtime.reconnectAttempts.clear();
 
   for (const picoId of runtime.connectedPeripherals.keys()) {
     const pico = picoList[picoId];

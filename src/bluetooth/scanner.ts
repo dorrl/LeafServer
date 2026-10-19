@@ -1,4 +1,5 @@
 import noble from '@abandonware/noble';
+import { picoList } from '../pico.js';
 import {
   BleRuntime,
   PICO_NAME_KEYWORDS,
@@ -10,7 +11,7 @@ import {
   CONNECTION_SWEEP_INTERVAL_MS,
   BLE_RESCAN_INTERVAL_MS
 } from './types.js';
-import { clearReconnectTimer, enqueuePico, sweepKnownPicos } from './connection.js';
+import { enqueuePico, sweepKnownPicos } from './connection.js';
 
 // Serialize every Noble scan operation. Requests are queued rather than dropped,
 // so a stop requested during start (or vice versa) is not silently lost.
@@ -85,26 +86,26 @@ export async function restartScanning(runtime: BleRuntime) {
 
 export function setupScanner(runtime: BleRuntime) {
   noble.on('discover', (peripheral: Peripheral) => {
-    const localName = peripheral.advertisement.localName;
+    const advertisedName = peripheral.advertisement.localName || undefined;
     const rawId = peripheral.address || peripheral.id;
     if (!rawId) return;
 
     const picoId = normalizePicoId(rawId);
-    const isKnownPico = runtime.knownPicos.has(picoId);
-    const isPico = isKnownPico || PICO_NAME_KEYWORDS.some(keyword => localName?.toLowerCase().includes(keyword));
+    const existing = runtime.knownPicos.get(picoId);
+    const isKnownPico = runtime.knownPicos.has(picoId) || Boolean(picoList[picoId]);
+    const isPico = isKnownPico || PICO_NAME_KEYWORDS.some(keyword => advertisedName?.toLowerCase().includes(keyword));
     if (!isPico) return;
 
-    const existing = runtime.knownPicos.get(picoId);
+    const localName = advertisedName || existing?.localName || picoList[picoId]?.name;
     runtime.knownPicos.set(picoId, {
       peripheral,
-      localName: localName || existing?.localName,
+      localName,
       lastSeenAt: Date.now()
     });
 
-    // A fresh advertisement supersedes a pending cooldown and provides a fresh
-    // Peripheral object for the next connection attempt.
-    clearReconnectTimer(runtime, picoId);
-    enqueuePico(runtime, peripheral, picoId, localName || existing?.localName);
+    // Advertisements refresh the cache during cooldown but must not bypass it.
+    // enqueuePico ignores this device while its reconnect timer is active.
+    enqueuePico(runtime, peripheral, picoId, localName);
   });
 
   setInterval(() => sweepKnownPicos(runtime), CONNECTION_SWEEP_INTERVAL_MS);
@@ -126,6 +127,9 @@ export async function recoverScanning(runtime: BleRuntime) {
 export function removeStalePicos(runtime: BleRuntime) {
   const now = Date.now();
   for (const [picoId, device] of runtime.knownPicos) {
-    if (now - device.lastSeenAt > KNOWN_PICO_STALE_MS) runtime.knownPicos.delete(picoId);
+    if (device.peripheral && now - device.lastSeenAt > KNOWN_PICO_STALE_MS) {
+      // Retain identity/name metadata but never keep an old Peripheral usable.
+      runtime.knownPicos.set(picoId, { localName: device.localName, lastSeenAt: 0 });
+    }
   }
 }

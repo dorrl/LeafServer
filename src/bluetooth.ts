@@ -12,6 +12,7 @@ const runtime: BleRuntime = {
   connectingPeripherals: new Set(),
   queuedPicos: new Set(),
   pollingTimers: new Map(),
+  heartbeatTimers: new Map(),
   reconnectTimers: new Map(),
   reconnectAttempts: new Map(),
   knownPicos: new Map(),
@@ -34,6 +35,8 @@ noble.on('stateChange', async state => {
 
   scanning = false;
   for (const timer of runtime.pollingTimers.values()) clearInterval(timer);
+  for (const timer of runtime.heartbeatTimers.values()) clearTimeout(timer);
+  runtime.heartbeatTimers.clear();
   runtime.pollingTimers.clear();
   for (const timer of runtime.reconnectTimers.values()) clearTimeout(timer);
   runtime.reconnectTimers.clear();

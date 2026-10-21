@@ -5,6 +5,7 @@ export interface Characteristic {
   readonly properties: readonly string[];
   subscribeAsync(): Promise<void>;
   readAsync(): Promise<Buffer>;
+  writeAsync(data: Buffer, withoutResponse?: boolean): Promise<void>;
   on(event: 'data', listener: (data: Buffer) => void): this;
   on(event: 'error', listener: (error: Error) => void): this;
 }
@@ -45,6 +46,7 @@ export type BleRuntime = {
   connectingPeripherals: Set<string>;
   queuedPicos: Set<string>;
   pollingTimers: Map<string, ReturnType<typeof setInterval>>;
+  heartbeatTimers: Map<string, ReturnType<typeof setTimeout>>;
   reconnectTimers: Map<string, ReturnType<typeof setTimeout>>;
   reconnectAttempts: Map<string, number>;
   knownPicos: Map<string, KnownPico>;
@@ -71,6 +73,7 @@ export const SCAN_WATCHDOG_INTERVAL_MS = 60_000;
 export const BLE_RESCAN_INTERVAL_MS = 10 * 60 * 1000;
 export const KNOWN_PICO_STALE_MS = 60_000;
 export const MAX_PENDING_TEXT = 4096;
+export const HEARTBEAT_TIMEOUT_MS = 35_000;
 
 export function normalizePicoId(rawId: string): string {
   return rawId.toLowerCase().replace(/[^a-z0-9]/g, '');

@@ -1,4 +1,4 @@
-import { BleRuntime, Characteristic, DISCOVERY_TIMEOUT_MS, Peripheral } from './types.js';
+import { BleRuntime, Characteristic, DISCOVERY_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, Peripheral } from './types.js';
 import { applyPicoState, attachNotificationHandler } from './parser.js';
 
 async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
@@ -62,13 +62,35 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       throw new Error('characteristic discovery returned 0 characteristics');
     }
 
+    const writableCharacteristic = characteristics.find(characteristic =>
+      characteristic.properties.includes('write') || characteristic.properties.includes('writeWithoutResponse')
+    );
+    const notifyCharacteristics = characteristics.filter(characteristic =>
+      characteristic.properties.includes('notify') || characteristic.properties.includes('indicate')
+    );
     let hasSubscription = false;
     for (const characteristic of characteristics) {
       assertPeripheralConnected(peripheral, picoId);
       const properties = characteristic.properties;
       if (!properties.includes('notify') && !properties.includes('indicate')) continue;
       console.log(`[BLE] Subscribing: Pico=${picoId} characteristic=${characteristic.uuid}`);
-      attachNotificationHandler(pico, characteristic);
+      if (!writableCharacteristic) {
+        throw new Error('Pico UART write characteristic not found; heartbeat response is unavailable');
+      }
+      attachNotificationHandler(pico, characteristic, () => {
+        const previousTimer = runtime.heartbeatTimers.get(picoId);
+        if (previousTimer) clearTimeout(previousTimer);
+        const timer = setTimeout(() => {
+          runtime.heartbeatTimers.delete(picoId);
+          if (runtime.connectedPeripherals.get(picoId) !== peripheral || peripheral.state === 'disconnected') return;
+          console.warn(`[BLE] Heartbeat timeout: ${picoId}; disconnecting stale connection`);
+          void peripheral.disconnectAsync().catch(() => {});
+        }, HEARTBEAT_TIMEOUT_MS);
+        runtime.heartbeatTimers.set(picoId, timer);
+        void writableCharacteristic.writeAsync(Buffer.from('PONG\\n', 'utf-8'), true).catch(error => {
+          console.error(`[BLE] Heartbeat response failed: ${picoId}:`, error instanceof Error ? error.message : error);
+        });
+      });
       await withTimeout(
         characteristic.subscribeAsync(),
         DISCOVERY_TIMEOUT_MS,

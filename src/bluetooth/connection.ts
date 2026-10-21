@@ -11,6 +11,8 @@ export function delay(ms: number) { return new Promise(resolve => setTimeout(res
 export function clearPicoPolling(runtime: BleRuntime, picoId: string) {
   const timer = runtime.pollingTimers.get(picoId);
   if (timer) { clearInterval(timer); runtime.pollingTimers.delete(picoId); }
+  const heartbeatTimer = runtime.heartbeatTimers.get(picoId);
+  if (heartbeatTimer) { clearTimeout(heartbeatTimer); runtime.heartbeatTimers.delete(picoId); }
 }
 
 export function clearReconnectTimer(runtime: BleRuntime, picoId: string) {

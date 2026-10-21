@@ -78,7 +78,7 @@ export function applyPicoState(pico: Pico, data: Buffer, characteristicUuid: str
   }
 }
 
-export function attachNotificationHandler(pico: Pico, characteristic: Characteristic): void {
+export function attachNotificationHandler(pico: Pico, characteristic: Characteristic, onHeartbeat: () => void): void {
   let pendingText = '';
 
   characteristic.on('data', (data: Buffer) => {
@@ -94,7 +94,13 @@ export function attachNotificationHandler(pico: Pico, characteristic: Characteri
       const line = pendingText.slice(0, newlineIndex).replace(/\r$/, '').trim();
       pendingText = pendingText.slice(newlineIndex + 1);
 
-      if (line) applyPicoState(pico, Buffer.from(line, 'utf-8'), characteristic.uuid, 'notification');
+      if (line) {
+        if (line === 'PING' || line === '{\"type\":\"PING\"}') {
+          onHeartbeat();
+        } else if (line !== 'PONG') {
+          applyPicoState(pico, Buffer.from(line, 'utf-8'), characteristic.uuid, 'notification');
+        }
+      }
       newlineIndex = pendingText.indexOf('\n');
     }
   });

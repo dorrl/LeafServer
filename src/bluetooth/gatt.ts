@@ -65,9 +65,9 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
     const writableCharacteristic = characteristics.find(characteristic =>
       characteristic.properties.includes('write') || characteristic.properties.includes('writeWithoutResponse')
     );
-    const notifyCharacteristics = characteristics.filter(characteristic =>
-      characteristic.properties.includes('notify') || characteristic.properties.includes('indicate')
-    );
+    const writeWithoutResponse = Boolean(writableCharacteristic &&
+      !writableCharacteristic.properties.includes('write') &&
+      writableCharacteristic.properties.includes('writeWithoutResponse'));
     let hasSubscription = false;
     for (const characteristic of characteristics) {
       assertPeripheralConnected(peripheral, picoId);
@@ -87,7 +87,7 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
           void peripheral.disconnectAsync().catch(() => {});
         }, HEARTBEAT_TIMEOUT_MS);
         runtime.heartbeatTimers.set(picoId, timer);
-        void writableCharacteristic.writeAsync(Buffer.from('PONG\n', 'utf-8'), true).catch(error => {
+        void writableCharacteristic.writeAsync(Buffer.from('PONG\n', 'utf-8'), writeWithoutResponse).catch(error => {
           console.error(`[BLE] Heartbeat response failed: ${picoId}:`, error instanceof Error ? error.message : error);
         });
       });

@@ -87,7 +87,7 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
           void peripheral.disconnectAsync().catch(() => {});
         }, HEARTBEAT_TIMEOUT_MS);
         runtime.heartbeatTimers.set(picoId, timer);
-        void writableCharacteristic.writeAsync(Buffer.from('PONG\\n', 'utf-8'), true).catch(error => {
+        void writableCharacteristic.writeAsync(Buffer.from('PONG\n', 'utf-8'), true).catch(error => {
           console.error(`[BLE] Heartbeat response failed: ${picoId}:`, error instanceof Error ? error.message : error);
         });
       });

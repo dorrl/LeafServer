@@ -26,6 +26,7 @@ export interface Peripheral {
   disconnectAsync(): Promise<void>;
   discoverServicesAsync(serviceUUIDs: string[]): Promise<BleService[]>;
   once(event: 'disconnect', listener: (error?: Error | string) => void): this;
+  removeListener(event: 'disconnect', listener: (error?: Error | string) => void): this;
 }
 
 export type QueuedDevice = {

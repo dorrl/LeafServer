@@ -1,17 +1,33 @@
-import { BleRuntime, Characteristic, DISCOVERY_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, Peripheral } from './types.js';
+import { BleRuntime, BleService, Characteristic, DISCOVERY_TIMEOUT_MS, HEARTBEAT_TIMEOUT_MS, Peripheral } from './types.js';
 import { applyPicoState, attachNotificationHandler } from './parser.js';
 
-async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+async function withTimeout<T>(
+  peripheral: Peripheral,
+  operation: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let onDisconnect: ((error?: Error | string) => void) | undefined;
+  const disconnected = new Promise<never>((_, reject) => {
+    onDisconnect = error => {
+      const detail = error ? `: ${String(error)}` : '';
+      reject(new Error(`peripheral disconnected during GATT setup${detail}`));
+    };
+    peripheral.once('disconnect', onDisconnect);
+  });
+
   try {
     return await Promise.race([
       operation,
+      disconnected,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(message)), timeoutMs);
       })
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+    if (onDisconnect) peripheral.removeListener('disconnect', onDisconnect);
   }
 }
 
@@ -26,16 +42,26 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
   if (!pico) throw new Error(`Pico not found: ${picoId}`);
 
   try {
-    console.log(`[BLE] Discovering services: ${picoId}`);
-    const services = await withTimeout(
-      peripheral.discoverServicesAsync([]),
-      DISCOVERY_TIMEOUT_MS,
-      `service discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms`
-    );
-    assertPeripheralConnected(peripheral, picoId);
-    console.log(`[BLE] Services discovered: ${picoId}, services=${services.length}`);
+    let services: BleService[] = [];
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      assertPeripheralConnected(peripheral, picoId);
+      console.log(`[BLE] Discovering services: ${picoId} (attempt ${attempt}/3)`);
+      services = await withTimeout(
+        peripheral,
+        peripheral.discoverServicesAsync([]),
+        DISCOVERY_TIMEOUT_MS,
+        `service discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms`
+      );
+      assertPeripheralConnected(peripheral, picoId);
+      console.log(`[BLE] Services discovered: ${picoId}, services=${services.length}`);
+      if (services.length > 0) break;
+      if (attempt < 3) {
+        console.warn(`[BLE] Empty service list for ${picoId}; retrying GATT discovery`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
     if (services.length === 0) {
-      throw new Error('service discovery returned 0 services');
+      throw new Error('service discovery returned 0 services after 3 attempts');
     }
 
     const discoverableServices = services.filter(service => {
@@ -48,6 +74,7 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       const serviceUuid = service.uuid || 'unknown';
       console.log(`[BLE] Discovering characteristics: ${picoId}, service=${serviceUuid}`);
       const serviceCharacteristics = await withTimeout(
+        peripheral,
         service.discoverCharacteristicsAsync([]),
         DISCOVERY_TIMEOUT_MS,
         `characteristic discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms (service=${serviceUuid})`
@@ -92,6 +119,7 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
         });
       });
       await withTimeout(
+        peripheral,
         characteristic.subscribeAsync(),
         DISCOVERY_TIMEOUT_MS,
         `notification subscription timeout after ${DISCOVERY_TIMEOUT_MS}ms (characteristic=${characteristic.uuid})`

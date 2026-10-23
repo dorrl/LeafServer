@@ -67,16 +67,31 @@ export function scheduleReconnect(runtime: BleRuntime, picoId: string) {
   runtime.reconnectAttempts.set(picoId, attempt);
   const delayMs = Math.min(RECONNECT_DELAY_MS * 2 ** (attempt - 1), MAX_RECONNECT_DELAY_MS);
 
-  runtime.reconnectTimers.set(picoId, setTimeout(() => {
+  const runFreshScan = async () => {
     runtime.reconnectTimers.delete(picoId);
-    if (!runtime.isAdapterPoweredOn()) return;
+    if (!runtime.isAdapterPoweredOn() || runtime.connectedPeripherals.has(picoId)) return;
+
+    // Never lose a retry merely because another Pico is still being configured.
+    // Keep the same backoff attempt while waiting for the serialized queue.
+    if (runtime.getQueueRunning() || runtime.connectionQueue.length > 0) {
+      runtime.reconnectTimers.set(picoId, setTimeout(() => { void runFreshScan(); }, 1000));
+      return;
+    }
 
     console.log(`[BLE] Starting fresh scan for ${picoId} (retry ${attempt}, delay ${delayMs}ms)`);
-    // Drop even advertisements received during cooldown so this cycle can only
-    // enqueue a Peripheral discovered by the fresh scan.
     invalidatePeripheral(runtime, picoId);
-    void restartScanning(runtime);
-  }, delayMs));
+    await restartScanning(runtime);
+
+    // restartScanning can decline a request during a queue/adapter transition.
+    // Re-arm it instead of silently losing the only reconnect timer.
+    if (runtime.isAdapterPoweredOn() &&
+        !runtime.connectedPeripherals.has(picoId) &&
+        !runtime.getScanning()) {
+      runtime.reconnectTimers.set(picoId, setTimeout(() => { void runFreshScan(); }, 1000));
+    }
+  };
+
+  runtime.reconnectTimers.set(picoId, setTimeout(() => { void runFreshScan(); }, delayMs));
 }
 
 async function connectWithRetry(peripheral: Peripheral, picoId: string) {
@@ -121,7 +136,6 @@ export async function processConnectionQueue(runtime: BleRuntime) {
       try {
         await connectWithRetry(item.peripheral, item.picoId);
         runtime.connectedPeripherals.set(item.picoId, item.peripheral);
-        runtime.connectingPeripherals.delete(item.picoId);
         clearReconnectTimer(runtime, item.picoId);
         runtime.reconnectAttempts.delete(item.picoId);
         runtime.knownPicos.set(item.picoId, {
@@ -134,9 +148,12 @@ export async function processConnectionQueue(runtime: BleRuntime) {
         pico.setConnected(true);
         registerDisconnectHandler(runtime, item.peripheral, item.picoId);
         await setupPeripheral(runtime, item.peripheral, item.picoId, item.localName);
+        runtime.connectingPeripherals.delete(item.picoId);
         console.log(`[BLE] Connection ready: ${item.picoId}`);
       } catch (error) {
-        runtime.connectedPeripherals.delete(item.picoId);
+        if (runtime.connectedPeripherals.get(item.picoId) === item.peripheral) {
+          runtime.connectedPeripherals.delete(item.picoId);
+        }
         runtime.connectingPeripherals.delete(item.picoId);
         removeQueuedPico(runtime, item.picoId);
         clearPicoPolling(runtime, item.picoId);

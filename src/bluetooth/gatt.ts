@@ -107,12 +107,12 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
 
         missedHeartbeats += 1;
         if (missedHeartbeats >= 3) {
-          console.warn(\`[BLE] Heartbeat missed 3 consecutive intervals: \${picoId}; disconnecting stale connection\`);
+          console.warn(`[BLE] Heartbeat missed 3 consecutive intervals: ${picoId}; disconnecting stale connection`);
           void peripheral.disconnectAsync().catch(() => {});
           return;
         }
 
-        console.warn(\`[BLE] Heartbeat missed for \${picoId} (\${missedHeartbeats}/3); keeping connection and waiting again\`);
+        console.warn(`[BLE] Heartbeat missed for ${picoId} (${missedHeartbeats}/3); keeping connection and waiting again`);
         armHeartbeatWatchdog();
       }, HEARTBEAT_TIMEOUT_MS);
       runtime.heartbeatTimers.set(picoId, timer);
@@ -122,7 +122,7 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       assertPeripheralConnected(peripheral, picoId);
       const properties = characteristic.properties;
       if (!properties.includes('notify') && !properties.includes('indicate')) continue;
-      console.log(\`[BLE] Subscribing: Pico=\${picoId} characteristic=\${characteristic.uuid}\`);
+      console.log(`[BLE] Subscribing: Pico=${picoId} characteristic=${characteristic.uuid}`);
       if (!writableCharacteristic) {
         throw new Error('Pico UART write characteristic not found; heartbeat response is unavailable');
       }
@@ -130,19 +130,19 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
         missedHeartbeats = 0;
         armHeartbeatWatchdog();
         void writableCharacteristic.writeAsync(Buffer.from('PONG\n', 'utf-8'), writeWithoutResponse).catch(error => {
-          console.error(\`[BLE] Heartbeat response failed: \${picoId}:\`, error instanceof Error ? error.message : error);
+          console.error(`[BLE] Heartbeat response failed: ${picoId}:`, error instanceof Error ? error.message : error);
         });
       });
       await withTimeout(
         peripheral,
         characteristic.subscribeAsync(),
         DISCOVERY_TIMEOUT_MS,
-        \`notification subscription timeout after \${DISCOVERY_TIMEOUT_MS}ms (characteristic=\${characteristic.uuid})\`
+        `notification subscription timeout after ${DISCOVERY_TIMEOUT_MS}ms (characteristic=${characteristic.uuid})`
       );
       assertPeripheralConnected(peripheral, picoId);
       hasSubscription = true;
       armHeartbeatWatchdog();
-      console.log(\`[BLE] Subscribed: Pico=\${picoId} characteristic=\${characteristic.uuid}\`);
+      console.log(`[BLE] Subscribed: Pico=${picoId} characteristic=${characteristic.uuid}`);
     }
 
     const readableChars = characteristics.filter(characteristic => {

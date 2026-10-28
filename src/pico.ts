@@ -10,7 +10,9 @@ const dataFile = path.join(dataDir, 'leaf-state.json');
 const legacyDataFile = path.join(dataDir, 'smartfarm-state.json');
 export const DEFAULT_SETTINGS: ServerSettings = { measurementIntervalMinutes: 1, syncIntervalMinutes: 5, retentionMonths: 6 };
 
-type PersistedData = { picos: PicoType[]; readings: Reading[]; alerts: Alert[]; settings?: ServerSettings; };
+type PersistedData = { picos: PicoType[]; readings: Reading[]; alerts: Alert[]; settings?: ServerSettings; disconnectNotificationAt?: Record<string, number>; };
+const DISCONNECT_NOTIFICATION_COOLDOWN_MS = 60 * 60 * 1000;
+let disconnectNotificationAt: Record<string, number> = {};
 let readings: Reading[] = [];
 let alerts: Alert[] = [];
 let settings: ServerSettings = { ...DEFAULT_SETTINGS };
@@ -120,7 +122,7 @@ function updateRangeAlert(pico: Pico, dayEnded = false, previousDayDurationMinut
 function persist() {
     pruneReadings();
     fs.mkdirSync(dataDir, { recursive: true });
-    const data: PersistedData = { picos: Object.values(picoList).map(pico => pico.export()), readings, alerts, settings };
+    const data: PersistedData = { picos: Object.values(picoList).map(pico => pico.export()), readings, alerts, settings, disconnectNotificationAt };
     const temporaryFile = dataFile + '.tmp';
     fs.writeFileSync(temporaryFile, JSON.stringify(data, null, 2), 'utf8');
     fs.renameSync(temporaryFile, dataFile);
@@ -209,7 +211,7 @@ export class Pico {
         const wasConnected = this.connected;
         this.connected = connected;
         this.updatedAt = new Date().toISOString();
-        // Only alert for a real connected -> disconnected transition.
+        // Keep every disconnect in the alert history, but send at most one push per Pico per hour.
         if (wasConnected && !connected) {
             const alert: Alert = {
                 id: crypto.randomUUID(),
@@ -220,9 +222,19 @@ export class Pico {
                 resolved: false
             };
             alerts.unshift(alert);
-            void sendFcmNotification(alert, this.name).catch(error => {
-                console.error('[FCM] Failed to send notification:', error instanceof Error ? error.message : error);
-            });
+
+            const now = Date.now();
+            const lastNotificationAt = disconnectNotificationAt[this.id] ?? 0;
+            if (now - lastNotificationAt >= DISCONNECT_NOTIFICATION_COOLDOWN_MS) {
+                // Persist the cooldown before sending so rapid disconnect events and restarts cannot spam pushes.
+                disconnectNotificationAt[this.id] = now;
+                void sendFcmNotification(alert, this.name).catch(error => {
+                    console.error('[FCM] Failed to send notification:', error instanceof Error ? error.message : error);
+                });
+            } else {
+                const remainingMinutes = Math.ceil((DISCONNECT_NOTIFICATION_COOLDOWN_MS - (now - lastNotificationAt)) / 60_000);
+                console.log(`[FCM] Disconnect notification suppressed for Pico=${this.id}; cooldown remaining about ${remainingMinutes} minute(s)`);
+            }
         }
         persist();
     }
@@ -313,6 +325,9 @@ export function loadPersistedData() {
         const data: PersistedData = JSON.parse(fs.readFileSync(sourceFile, 'utf8'));
         readings = Array.isArray(data.readings) ? data.readings : [];
         alerts = Array.isArray(data.alerts) ? data.alerts : [];
+        disconnectNotificationAt = data.disconnectNotificationAt && typeof data.disconnectNotificationAt === 'object'
+            ? Object.fromEntries(Object.entries(data.disconnectNotificationAt).filter(([id, timestamp]) => id.length > 0 && Number.isFinite(timestamp) && timestamp >= 0))
+            : {};
         if (data.settings && Number.isInteger(data.settings.retentionMonths)) {
             settings = {
                 measurementIntervalMinutes: 1,

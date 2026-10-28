@@ -8,6 +8,20 @@ import { stopScanning, startScanning, restartScanning } from './scanner.js';
 
 export function delay(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+// A stale Noble Peripheral can leave disconnectAsync() pending after a GATT failure.
+// Never let cleanup hold the serialized connection queue indefinitely.
+async function disconnectSafely(peripheral: Peripheral, timeoutMs = 1500): Promise<void> {
+  if (peripheral.state === 'disconnected') return;
+  try {
+    await Promise.race([
+      peripheral.disconnectAsync().catch(() => {}),
+      delay(timeoutMs)
+    ]);
+  } catch (_) {
+    // Cleanup is best-effort; the fresh scan/reconnect path must still run.
+  }
+}
+
 export function clearPicoPolling(runtime: BleRuntime, picoId: string) {
   const timer = runtime.pollingTimers.get(picoId);
   if (timer) { clearInterval(timer); runtime.pollingTimers.delete(picoId); }
@@ -109,7 +123,7 @@ async function connectWithRetry(peripheral: Peripheral, picoId: string) {
       return;
     } catch (error) {
       console.error(`[BLE] Connection attempt failed: ${picoId}`, error instanceof Error ? error.message : error);
-      try { await peripheral.disconnectAsync(); } catch (_) {}
+      await disconnectSafely(peripheral);
       if (attempt < CONNECT_RETRY_COUNT) await delay(CONNECT_RETRY_DELAY_MS);
     } finally {
       if (timeout) clearTimeout(timeout);
@@ -164,7 +178,7 @@ export async function processConnectionQueue(runtime: BleRuntime) {
 
         // Clear state before disconnecting: the disconnect event may fire immediately.
         scheduleReconnect(runtime, item.picoId);
-        try { await item.peripheral.disconnectAsync(); } catch (_) {}
+        await disconnectSafely(item.peripheral);
       }
     }
   } finally {

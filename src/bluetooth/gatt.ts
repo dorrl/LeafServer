@@ -71,20 +71,20 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
     const uartService = services.find(service => normalizeUuid(service.uuid) === UART_SERVICE_UUID);
     if (!uartService) {
       const discovered = services.map(service => service.uuid).join(', ') || '(none)';
-      throw new Error(\`Nordic UART service not found. Expected=\${UART_SERVICE_UUID}; discovered services=\${discovered}. Check the Pico Arduino-Pico BLE UUID fix is installed.\`);
+      throw new Error(`Nordic UART service not found. Expected=${UART_SERVICE_UUID}; discovered services=${discovered}. Check the Pico Arduino-Pico BLE UUID fix is installed.`);
     }
 
-    console.log(\`[BLE] Discovering UART characteristics: \${picoId}, service=\${uartService.uuid}\`);
+    console.log(`[BLE] Discovering UART characteristics: ${picoId}, service=${uartService.uuid}`);
     const characteristics = await withTimeout(
       peripheral,
       uartService.discoverCharacteristicsAsync([]),
       DISCOVERY_TIMEOUT_MS,
-      \`characteristic discovery timeout after \${DISCOVERY_TIMEOUT_MS}ms (service=\${uartService.uuid})\`
+      `characteristic discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms (service=${uartService.uuid})`
     );
     assertPeripheralConnected(peripheral, picoId);
-    console.log(\`[BLE] UART characteristics discovered: \${picoId}, count=\${characteristics.length}\`);
+    console.log(`[BLE] UART characteristics discovered: ${picoId}, count=${characteristics.length}`);
     for (const characteristic of characteristics) {
-      console.log(\`[BLE] Characteristic: Pico=\${picoId} uuid=\${characteristic.uuid} properties=\${characteristic.properties.join(',')}\`);
+      console.log(`[BLE] Characteristic: Pico=${picoId} uuid=${characteristic.uuid} properties=${characteristic.properties.join(',')}`);
     }
 
     const writableCharacteristic = characteristics.find(characteristic =>
@@ -96,10 +96,10 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       (characteristic.properties.includes('notify') || characteristic.properties.includes('indicate'))
     );
     if (!writableCharacteristic) {
-      throw new Error(\`Nordic UART RX characteristic not writable. Expected=\${UART_RX_UUID}; discovered=\${characteristics.map(characteristic => \`\${characteristic.uuid}[\${characteristic.properties.join(',')}]\`).join('; ')}\`);
+      throw new Error(`Nordic UART RX characteristic not writable. Expected=${UART_RX_UUID}; discovered=${characteristics.map(characteristic => `${characteristic.uuid}[${characteristic.properties.join(',')}]`).join('; ')}`);
     }
     if (!notificationCharacteristic) {
-      throw new Error(\`Nordic UART TX notification characteristic not found. Expected=\${UART_TX_UUID}; discovered=\${characteristics.map(characteristic => \`\${characteristic.uuid}[\${characteristic.properties.join(',')}]\`).join('; ')}\`);
+      throw new Error(`Nordic UART TX notification characteristic not found. Expected=${UART_TX_UUID}; discovered=${characteristics.map(characteristic => `${characteristic.uuid}[${characteristic.properties.join(',')}]`).join('; ')}`);
     }
     const writeWithoutResponse = !writableCharacteristic.properties.includes('write') &&
       writableCharacteristic.properties.includes('writeWithoutResponse');
@@ -116,21 +116,21 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
 
         missedHeartbeats += 1;
         if (missedHeartbeats >= 3) {
-          console.warn(\`[BLE] Heartbeat missed 3 consecutive intervals: \${picoId}; disconnecting stale connection\`);
+          console.warn(`[BLE] Heartbeat missed 3 consecutive intervals: ${picoId}; disconnecting stale connection`);
           void peripheral.disconnectAsync().catch(() => {});
           return;
         }
 
-        console.warn(\`[BLE] Heartbeat missed for \${picoId} (\${missedHeartbeats}/3); keeping connection and waiting again\`);
+        console.warn(`[BLE] Heartbeat missed for ${picoId} (${missedHeartbeats}/3); keeping connection and waiting again`);
         armHeartbeatWatchdog();
       }, HEARTBEAT_TIMEOUT_MS);
       runtime.heartbeatTimers.set(picoId, timer);
     };
 
     assertPeripheralConnected(peripheral, picoId);
-    console.log(\`[BLE] Subscribing to Nordic UART TX: Pico=\${picoId} characteristic=\${notificationCharacteristic.uuid}\`);
+    console.log(`[BLE] Subscribing to Nordic UART TX: Pico=${picoId} characteristic=${notificationCharacteristic.uuid}`);
     attachNotificationHandler(pico, notificationCharacteristic, () => {
-      console.log(\`[BLE] Heartbeat PING received: Pico=\${picoId}\`);
+      console.log(`[BLE] Heartbeat PING received: Pico=${picoId}`);
       missedHeartbeats = 0;
       consecutiveValidHeartbeats += 1;
       if (consecutiveValidHeartbeats >= 6) {
@@ -140,22 +140,22 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       }
       armHeartbeatWatchdog();
       void writableCharacteristic.writeAsync(Buffer.from('PONG\n', 'utf-8'), writeWithoutResponse).then(() => {
-        console.log(\`[BLE] Heartbeat PONG written: Pico=\${picoId} characteristic=\${writableCharacteristic.uuid}\`);
+        console.log(`[BLE] Heartbeat PONG written: Pico=${picoId} characteristic=${writableCharacteristic.uuid}`);
       }).catch(error => {
-        console.error(\`[BLE] Heartbeat response failed: Pico=\${picoId} characteristic=\${writableCharacteristic.uuid}:\`, error instanceof Error ? error.message : error);
+        console.error(`[BLE] Heartbeat response failed: Pico=${picoId} characteristic=${writableCharacteristic.uuid}:`, error instanceof Error ? error.message : error);
       });
     });
     await withTimeout(
       peripheral,
       notificationCharacteristic.subscribeAsync(),
       DISCOVERY_TIMEOUT_MS,
-      \`notification subscription timeout after \${DISCOVERY_TIMEOUT_MS}ms (characteristic=\${notificationCharacteristic.uuid})\`
+      `notification subscription timeout after ${DISCOVERY_TIMEOUT_MS}ms (characteristic=${notificationCharacteristic.uuid})`
     );
     assertPeripheralConnected(peripheral, picoId);
     hasSubscription = true;
     // Wait for the Pico's first PING before starting the heartbeat timeout.
     // The Pico sends its first heartbeat 10 seconds after connection.
-    console.log(\`[BLE] Subscribed to Nordic UART TX: Pico=\${picoId} characteristic=\${notificationCharacteristic.uuid}\`);
+    console.log(`[BLE] Subscribed to Nordic UART TX: Pico=${picoId} characteristic=${notificationCharacteristic.uuid}`);
 
     const readableChars = characteristics.filter(characteristic => {
       const properties = characteristic.properties;

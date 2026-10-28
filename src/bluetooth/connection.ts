@@ -151,7 +151,8 @@ export async function processConnectionQueue(runtime: BleRuntime) {
         await connectWithRetry(item.peripheral, item.picoId);
         runtime.connectedPeripherals.set(item.picoId, item.peripheral);
         clearReconnectTimer(runtime, item.picoId);
-        runtime.reconnectAttempts.delete(item.picoId);
+        // Do not reset backoff on a brief connection. setupPeripheral clears it
+        // only after several consecutive heartbeats prove the link is stable.
         runtime.knownPicos.set(item.picoId, {
           peripheral: item.peripheral,
           localName: item.localName || runtime.knownPicos.get(item.picoId)?.localName,

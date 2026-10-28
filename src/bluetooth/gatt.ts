@@ -97,6 +97,7 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       writableCharacteristic.properties.includes('writeWithoutResponse'));
     let hasSubscription = false;
     let missedHeartbeats = 0;
+    let consecutiveValidHeartbeats = 0;
     const armHeartbeatWatchdog = () => {
       const previousTimer = runtime.heartbeatTimers.get(picoId);
       if (previousTimer) clearTimeout(previousTimer);
@@ -128,8 +129,15 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       }
       attachNotificationHandler(pico, characteristic, () => {
         missedHeartbeats = 0;
+        consecutiveValidHeartbeats += 1;
+        if (consecutiveValidHeartbeats >= 6) {
+          // A connection is stable only after about 60 seconds of valid PINGs.
+          // Short-lived links retain their exponential reconnect backoff.
+          runtime.reconnectAttempts.delete(picoId);
+          consecutiveValidHeartbeats = 0;
+        }
         armHeartbeatWatchdog();
-        void writableCharacteristic.writeAsync(Buffer.from('PONG\n', 'utf-8'), writeWithoutResponse).catch(error => {
+        void writableCharacteristic.writeAsync(Buffer.from('PONG\\n', 'utf-8'), writeWithoutResponse).catch(error => {
           console.error(`[BLE] Heartbeat response failed: ${picoId}:`, error instanceof Error ? error.message : error);
         });
       });

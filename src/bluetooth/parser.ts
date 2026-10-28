@@ -95,7 +95,7 @@ export function attachNotificationHandler(pico: Pico, characteristic: Characteri
       pendingText = pendingText.slice(newlineIndex + 1);
 
       if (line) {
-        if (line === 'PING' || line === '{\"type\":\"PING\"}') {
+        if (line === 'PING' || line === '{"type":"PING"}') {
           onHeartbeat();
         } else if (line !== 'PONG') {
           applyPicoState(pico, Buffer.from(line, 'utf-8'), characteristic.uuid, 'notification');

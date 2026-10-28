@@ -137,7 +137,7 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
           consecutiveValidHeartbeats = 0;
         }
         armHeartbeatWatchdog();
-        void writableCharacteristic.writeAsync(Buffer.from('PONG\\n', 'utf-8'), writeWithoutResponse).catch(error => {
+        void writableCharacteristic.writeAsync(Buffer.from('PONG\n', 'utf-8'), writeWithoutResponse).catch(error => {
           console.error(`[BLE] Heartbeat response failed: ${picoId}:`, error instanceof Error ? error.message : error);
         });
       });

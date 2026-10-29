@@ -160,9 +160,14 @@ export async function processConnectionQueue(runtime: BleRuntime) {
         });
 
         const pico = getOrCreatePico(item.picoId, item.localName);
-        pico.setConnected(true);
+        // Register before GATT setup so disconnects during discovery are caught,
+        // but do not mark the Pico online until its UART service is ready.
         registerDisconnectHandler(runtime, item.peripheral, item.picoId);
         await setupPeripheral(runtime, item.peripheral, item.picoId, item.localName);
+        if (runtime.connectedPeripherals.get(item.picoId) !== item.peripheral || item.peripheral.state === 'disconnected') {
+          throw new Error('peripheral disconnected before GATT setup completed');
+        }
+        pico.setConnected(true);
         runtime.connectingPeripherals.delete(item.picoId);
         console.log(`[BLE] Connection ready: ${item.picoId}`);
       } catch (error) {

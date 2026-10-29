@@ -43,6 +43,10 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
 
   try {
     let services: BleService[] = [];
+    const normalizeUuid = (uuid: string) => uuid.toLowerCase().replace(/[^a-f0-9]/g, '');
+    const UART_SERVICE_UUID = '6e400001b5a3f393e0a9e50e24dcca9e';
+    const UART_RX_UUID = '6e400002b5a3f393e0a9e50e24dcca9e';
+    const UART_TX_UUID = '6e400003b5a3f393e0a9e50e24dcca9e';
     for (let attempt = 1; attempt <= 3; attempt++) {
       assertPeripheralConnected(peripheral, picoId);
       console.log(`[BLE] Discovering services: ${picoId} (attempt ${attempt}/3)`);
@@ -54,20 +58,17 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       );
       assertPeripheralConnected(peripheral, picoId);
       console.log(`[BLE] Services discovered: ${picoId}, services=${services.length}`);
-      if (services.length > 0) break;
+      if (services.some(service => normalizeUuid(service.uuid) === UART_SERVICE_UUID)) break;
       if (attempt < 3) {
-        console.warn(`[BLE] Empty service list for ${picoId}; retrying GATT discovery`);
-        await new Promise(resolve => setTimeout(resolve, 500));
+        const discovered = services.map(service => service.uuid).join(', ') || '(none)';
+        console.warn(`[BLE] Nordic UART service not visible yet for ${picoId} (attempt ${attempt}/3); services=${discovered}; retrying GATT discovery`);
+        await new Promise(resolve => setTimeout(resolve, 750));
       }
     }
     if (services.length === 0) {
       throw new Error('service discovery returned 0 services after 3 attempts');
     }
 
-    const normalizeUuid = (uuid: string) => uuid.toLowerCase().replace(/[^a-f0-9]/g, '');
-    const UART_SERVICE_UUID = '6e400001b5a3f393e0a9e50e24dcca9e';
-    const UART_RX_UUID = '6e400002b5a3f393e0a9e50e24dcca9e';
-    const UART_TX_UUID = '6e400003b5a3f393e0a9e50e24dcca9e';
     const uartService = services.find(service => normalizeUuid(service.uuid) === UART_SERVICE_UUID);
     if (!uartService) {
       const discovered = services.map(service => service.uuid).join(', ') || '(none)';

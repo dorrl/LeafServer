@@ -59,7 +59,6 @@ export function enqueuePico(runtime: BleRuntime, peripheral: Peripheral, picoId:
   runtime.queuedPicos.add(picoId);
   runtime.connectingPeripherals.add(picoId);
   runtime.connectionQueue.push({ peripheral, picoId, localName });
-  console.log(`[BLE] Pico queued: ${picoId}`);
   void processConnectionQueue(runtime);
 }
 
@@ -92,7 +91,6 @@ export function scheduleReconnect(runtime: BleRuntime, picoId: string) {
       return;
     }
 
-    console.log(`[BLE] Starting fresh scan for ${picoId} (retry ${attempt}, delay ${delayMs}ms)`);
     invalidatePeripheral(runtime, picoId);
     await restartScanning(runtime);
 
@@ -110,7 +108,6 @@ export function scheduleReconnect(runtime: BleRuntime, picoId: string) {
 
 async function connectWithRetry(peripheral: Peripheral, picoId: string) {
   for (let attempt = 1; attempt <= CONNECT_RETRY_COUNT; attempt++) {
-    console.log(`[BLE] Connecting: ${picoId} (attempt ${attempt}/${CONNECT_RETRY_COUNT})`);
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
@@ -119,10 +116,8 @@ async function connectWithRetry(peripheral: Peripheral, picoId: string) {
           timeout = setTimeout(() => reject(new Error(`connection timeout after ${CONNECT_TIMEOUT_MS}ms`)), CONNECT_TIMEOUT_MS);
         })
       ]);
-      console.log(`[BLE] Connected: ${picoId}`);
       return;
     } catch (error) {
-      console.error(`[BLE] Connection attempt failed: ${picoId}`, error instanceof Error ? error.message : error);
       await disconnectSafely(peripheral);
       if (attempt < CONNECT_RETRY_COUNT) await delay(CONNECT_RETRY_DELAY_MS);
     } finally {

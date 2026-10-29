@@ -49,7 +49,6 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
     const UART_TX_UUID = '6e400003b5a3f393e0a9e50e24dcca9e';
     for (let attempt = 1; attempt <= 3; attempt++) {
       assertPeripheralConnected(peripheral, picoId);
-      console.log(`[BLE] Discovering services: ${picoId} (attempt ${attempt}/3)`);
       services = await withTimeout(
         peripheral,
         peripheral.discoverServicesAsync([]),
@@ -57,7 +56,6 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
         `service discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms`
       );
       assertPeripheralConnected(peripheral, picoId);
-      console.log(`[BLE] Services discovered: ${picoId}, services=${services.length}`);
       if (services.some(service => normalizeUuid(service.uuid) === UART_SERVICE_UUID)) break;
       if (attempt < 3) {
         const discovered = services.map(service => service.uuid).join(', ') || '(none)';
@@ -75,7 +73,6 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       throw new Error(`Nordic UART service not found. Expected=${UART_SERVICE_UUID}; discovered services=${discovered}. Check the Pico Arduino-Pico BLE UUID fix is installed.`);
     }
 
-    console.log(`[BLE] Discovering UART characteristics: ${picoId}, service=${uartService.uuid}`);
     const characteristics = await withTimeout(
       peripheral,
       uartService.discoverCharacteristicsAsync([]),
@@ -83,9 +80,7 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       `characteristic discovery timeout after ${DISCOVERY_TIMEOUT_MS}ms (service=${uartService.uuid})`
     );
     assertPeripheralConnected(peripheral, picoId);
-    console.log(`[BLE] UART characteristics discovered: ${picoId}, count=${characteristics.length}`);
     for (const characteristic of characteristics) {
-      console.log(`[BLE] Characteristic: Pico=${picoId} uuid=${characteristic.uuid} properties=${characteristic.properties.join(',')}`);
     }
 
     const writableCharacteristic = characteristics.find(characteristic =>
@@ -129,9 +124,7 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
     };
 
     assertPeripheralConnected(peripheral, picoId);
-    console.log(`[BLE] Subscribing to Nordic UART TX: Pico=${picoId} characteristic=${notificationCharacteristic.uuid}`);
     attachNotificationHandler(pico, notificationCharacteristic, () => {
-      console.log(`[BLE] Heartbeat PING received: Pico=${picoId}`);
       missedHeartbeats = 0;
       consecutiveValidHeartbeats += 1;
       if (consecutiveValidHeartbeats >= 6) {
@@ -141,7 +134,6 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
       }
       armHeartbeatWatchdog();
       void writableCharacteristic.writeAsync(Buffer.from('PONG\n', 'utf-8'), writeWithoutResponse).then(() => {
-        console.log(`[BLE] Heartbeat PONG written: Pico=${picoId} characteristic=${writableCharacteristic.uuid}`);
       }).catch(error => {
         console.error(`[BLE] Heartbeat response failed: Pico=${picoId} characteristic=${writableCharacteristic.uuid}:`, error instanceof Error ? error.message : error);
       });
@@ -156,7 +148,6 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
     hasSubscription = true;
     // Wait for the Pico's first PING before starting the heartbeat timeout.
     // The Pico sends its first heartbeat 10 seconds after connection.
-    console.log(`[BLE] Subscribed to Nordic UART TX: Pico=${picoId} characteristic=${notificationCharacteristic.uuid}`);
 
     const readableChars = characteristics.filter(characteristic => {
       const properties = characteristic.properties;
@@ -193,7 +184,6 @@ export async function setupPeripheral(runtime: BleRuntime, peripheral: Periphera
 
     if (!hasSubscription && readableChars.length === 0) console.warn(`[BLE] Pico ${picoId} has no readable/notify characteristics`);
   } catch (error) {
-    console.error(`[BLE] Service setup failed: ${picoId}:`, error instanceof Error ? error.message : error);
     throw error;
   }
 }

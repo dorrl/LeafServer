@@ -130,11 +130,13 @@ async function connectWithRetry(peripheral: Peripheral, picoId: string) {
 export async function processConnectionQueue(runtime: BleRuntime) {
   if (runtime.getQueueRunning()) return;
   runtime.setQueueRunning(true);
+  runtime.setQueueProgressAt(Date.now());
   try {
     await stopScanning(runtime);
     while (runtime.connectionQueue.length > 0) {
       const item: QueuedDevice | undefined = runtime.connectionQueue.shift();
       if (!item) continue;
+      runtime.setQueueProgressAt(Date.now());
       runtime.queuedPicos.delete(item.picoId);
 
       if (!runtime.isAdapterPoweredOn() || runtime.connectedPeripherals.has(item.picoId)) {
@@ -159,6 +161,7 @@ export async function processConnectionQueue(runtime: BleRuntime) {
         // but do not mark the Pico online until its UART service is ready.
         registerDisconnectHandler(runtime, item.peripheral, item.picoId);
         await setupPeripheral(runtime, item.peripheral, item.picoId, item.localName);
+        runtime.setQueueProgressAt(Date.now());
         if (runtime.connectedPeripherals.get(item.picoId) !== item.peripheral || item.peripheral.state === 'disconnected') {
           throw new Error('peripheral disconnected before GATT setup completed');
         }
@@ -184,6 +187,7 @@ export async function processConnectionQueue(runtime: BleRuntime) {
     }
   } finally {
     runtime.setQueueRunning(false);
+    runtime.setQueueProgressAt(0);
 
     // A discover event can enqueue a device while the queue is finishing. Do not
     // leave that item stranded: drain it before allowing scanning to resume.

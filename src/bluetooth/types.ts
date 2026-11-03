@@ -56,6 +56,8 @@ export type BleRuntime = {
   setScanning: (value: boolean) => void;
   getQueueRunning: () => boolean;
   setQueueRunning: (value: boolean) => void;
+  getQueueProgressAt: () => number;
+  setQueueProgressAt: (value: number) => void;
   isAdapterPoweredOn: () => boolean;
 };
 
@@ -75,6 +77,9 @@ export const BLE_RESCAN_INTERVAL_MS = 10 * 60 * 1000;
 export const KNOWN_PICO_STALE_MS = 60_000;
 export const MAX_PENDING_TEXT = 4096;
 export const HEARTBEAT_TIMEOUT_MS = 35_000;
+export const BLE_STALL_TIMEOUT_MS = 5 * 60 * 1000;
+export const BLE_WATCHDOG_INTERVAL_MS = 15_000;
+export const BLE_RESET_COOLDOWN_MS = 2 * 60 * 1000;
 
 export function normalizePicoId(rawId: string): string {
   return rawId.toLowerCase().replace(/[^a-z0-9]/g, '');

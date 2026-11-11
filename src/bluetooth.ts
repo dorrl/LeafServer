@@ -1,7 +1,7 @@
 import noble from '@abandonware/noble';
 import { picoList } from './pico.js';
 import { BleRuntime, BLE_STALL_TIMEOUT_MS, BLE_WATCHDOG_INTERVAL_MS, BLE_RESET_COOLDOWN_MS } from './bluetooth/types.js';
-import { startScanning, setupScanner } from './bluetooth/scanner.js';
+import { restartScanning, startScanning, setupScanner } from './bluetooth/scanner.js';
 
 let scanning = false;
 let queueRunning = false;
@@ -72,7 +72,12 @@ setInterval(() => {
     // bounded fallback to release the guard and request scanning if powered on.
     setTimeout(() => {
       bleResetInProgress = false;
-      if (adapterPoweredOn) void startScanning(runtime);
+      if (adapterPoweredOn) {
+        console.warn('[BLE] Adapter reset produced no poweredOn event; forcing a fresh scan cycle');
+        void restartScanning(runtime);
+      } else {
+        console.error('[BLE] Adapter did not return to poweredOn after reset; check the Raspberry Pi Bluetooth service');
+      }
     }, 30_000);
   } catch (error) {
     bleResetInProgress = false;
@@ -81,6 +86,7 @@ setInterval(() => {
 }, BLE_WATCHDOG_INTERVAL_MS);
 
 noble.on('stateChange', async state => {
+  console.log(`[BLE] Adapter state changed: ${state}`);
   adapterPoweredOn = state === 'poweredOn';
   if (adapterPoweredOn) {
     bleResetInProgress = false;

@@ -16,10 +16,28 @@ import { enqueuePico, sweepKnownPicos } from './connection.js';
 // Serialize every Noble scan operation. Requests are queued rather than dropped,
 // so a stop requested during start (or vice versa) is not silently lost.
 let scanOperation: Promise<void> | undefined;
+const SCAN_OPERATION_TIMEOUT_MS = 15_000;
 
+// A Noble scan call can remain pending forever when the adapter is wedged.
+// Bound the lock lifetime so one stuck call cannot block every later recovery.
 async function withScanLock(operation: () => Promise<void>) {
   const previous = scanOperation ?? Promise.resolve();
-  const current = previous.catch(() => {}).then(operation);
+  const current = previous.catch(() => {}).then(async () => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        operation(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error(`scan operation timeout after ${SCAN_OPERATION_TIMEOUT_MS}ms`)),
+            SCAN_OPERATION_TIMEOUT_MS
+          );
+        })
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  });
   scanOperation = current;
   try {
     await current;

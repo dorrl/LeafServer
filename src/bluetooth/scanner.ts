@@ -41,6 +41,11 @@ async function withScanLock(operation: () => Promise<void>) {
   scanOperation = current;
   try {
     await current;
+  } catch (error) {
+    // Most scan operations are triggered by event handlers or timers with
+    // fire-and-forget calls. Never let a recovery timeout become an unhandled
+    // rejection that terminates the Node.js server.
+    console.error('[BLE] Scan operation failed:', error instanceof Error ? error.message : error);
   } finally {
     if (scanOperation === current) scanOperation = undefined;
   }
